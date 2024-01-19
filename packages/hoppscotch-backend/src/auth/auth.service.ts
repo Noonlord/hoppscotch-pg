@@ -234,6 +234,7 @@ export class AuthService {
         url = this.configService.get('VITE_BASE_URL');
     }
 
+    /*
     await this.mailerService.sendEmail(email, {
       template: 'user-invitation',
       variables: {
@@ -241,9 +242,11 @@ export class AuthService {
         magicLink: `${url}/enter?token=${generatedTokens.token}`,
       },
     });
-
+    */
+   
     return E.right(<DeviceIdentifierToken>{
       deviceIdentifier: generatedTokens.deviceIdentifier,
+      token: generatedTokens.token,
     });
   }
 

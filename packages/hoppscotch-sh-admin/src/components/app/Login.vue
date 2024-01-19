@@ -233,7 +233,9 @@ const signInWithMicrosoft = () => {
 const signInWithEmail = async () => {
   signingInWithEmail.value = true;
   try {
-    await auth.signInWithEmail(form.value.email);
+    const response = await auth.signInWithEmail(form.value.email);
+    console.log(response.token);
+    token.value = response.token;
     mode.value = 'email-sent';
     setLocalConfig('emailForSignIn', form.value.email);
   } catch (e) {

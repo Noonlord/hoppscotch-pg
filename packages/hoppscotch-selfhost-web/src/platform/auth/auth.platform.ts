@@ -258,7 +258,7 @@ export const def: AuthPlatformDef = {
   },
 
   async signInWithEmail(email: string) {
-    await sendMagicLink(email)
+    return await sendMagicLink(email)
   },
 
   isSignInWithEmailLink(url: string) {

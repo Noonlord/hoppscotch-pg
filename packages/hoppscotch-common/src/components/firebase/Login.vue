@@ -59,9 +59,13 @@
               {{ t("auth.we_sent_magic_link") }}
             </h3>
             <p class="text-center">
-              {{
-                t("auth.we_sent_magic_link_description", { email: form.email })
-              }}
+              <a
+                :href="`${baseUrl}/enter?token=${token}`"
+                >
+              <HoppButtonPrimary 
+                label="Click this button to complete the sign-in"
+              />
+              </a>
             </p>
           </div>
         </div>
@@ -157,9 +161,11 @@ const signingInWithGitHub = ref(false)
 const signingInWithMicrosoft = ref(false)
 const signingInWithEmail = ref(false)
 const mode = ref("sign-in")
+const token = ref("")
 
 const tosLink = import.meta.env.VITE_APP_TOS_LINK
 const privacyPolicyLink = import.meta.env.VITE_APP_PRIVACY_POLICY_LINK
+const baseUrl = import.meta.env.VITE_BASE_URL
 
 type AuthProviderItem = {
   id: string
@@ -289,7 +295,8 @@ const signInWithEmail = async () => {
 
   await platform.auth
     .signInWithEmail(form.email)
-    .then(() => {
+    .then((data) => {
+      token.value = data.token
       mode.value = "email-sent"
       persistenceService.setLocalConfig("emailForSignIn", form.email)
     })
