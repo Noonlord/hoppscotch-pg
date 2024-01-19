@@ -73,8 +73,9 @@ COPY aio-subpath-access.Caddyfile /etc/caddy/aio-subpath-access.Caddyfile
 ENTRYPOINT [ "tini", "--" ]
 RUN apk --no-cache add curl
 COPY --chmod=755 healthcheck.sh .
+COPY --chmod=755 entrypoint.sh .
 HEALTHCHECK --interval=2s CMD /bin/sh ./healthcheck.sh
-CMD ["node", "/usr/src/app/aio_run.mjs"]
+CMD ["/usr/src/app/entrypoint.sh"]
 EXPOSE 3170
 EXPOSE 3000
 EXPOSE 3100
