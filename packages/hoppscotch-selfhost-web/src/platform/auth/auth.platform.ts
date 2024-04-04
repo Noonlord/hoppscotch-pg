@@ -8,7 +8,8 @@ import { PersistenceService } from "@hoppscotch/common/services/persistence"
 import axios from "axios"
 import { BehaviorSubject, Subject } from "rxjs"
 import { Ref, ref, watch } from "vue"
-import { getAllowedAuthProviders } from "./auth.api"
+import { getAllowedAuthProviders, updateUserDisplayName } from "./auth.api"
+import * as E from "fp-ts/Either"
 
 export const authEvents$ = new Subject<AuthEvent | { event: "token_refresh" }>()
 const currentUser$ = new BehaviorSubject<HoppUser | null>(null)
@@ -114,6 +115,7 @@ async function setInitialUser() {
     } else {
       setUser(null)
       isGettingInitialUser.value = false
+      await logout()
     }
 
     return
@@ -146,22 +148,26 @@ async function setInitialUser() {
 }
 
 async function refreshToken() {
-  const res = await axios.get(
-    `${import.meta.env.VITE_BACKEND_API_URL}/auth/refresh`,
-    {
-      withCredentials: true,
+  try {
+    const res = await axios.get(
+      `${import.meta.env.VITE_BACKEND_API_URL}/auth/refresh`,
+      {
+        withCredentials: true,
+      }
+    )
+
+    const isSuccessful = res.status === 200
+
+    if (isSuccessful) {
+      authEvents$.next({
+        event: "token_refresh",
+      })
     }
-  )
 
-  const isSuccessful = res.status === 200
-
-  if (isSuccessful) {
-    authEvents$.next({
-      event: "token_refresh",
-    })
+    return isSuccessful
+  } catch (error) {
+    return false
   }
-
-  return isSuccessful
 }
 
 async function sendMagicLink(email: string) {
@@ -203,6 +209,13 @@ export const def: AuthPlatformDef = {
       fetchOptions: {
         credentials: "include",
       },
+    }
+  },
+
+  axiosPlatformConfig() {
+    return {
+      // for including cookies in the request
+      withCredentials: true,
     }
   },
 
@@ -305,9 +318,22 @@ export const def: AuthPlatformDef = {
   async setEmailAddress(_email: string) {
     return
   },
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   async setDisplayName(name: string) {
-    return
+    if (!name) return E.left("USER_NAME_CANNOT_BE_EMPTY")
+    if (!currentUser$.value) return E.left("NO_USER_LOGGED_IN")
+
+    const res = await updateUserDisplayName(name)
+
+    if (E.isRight(res)) {
+      setUser({
+        ...currentUser$.value,
+        displayName: res.right.updateDisplayName.displayName ?? null,
+      })
+
+      return E.right(undefined)
+    }
+    return E.left(res.left)
   },
 
   async signOutUser() {

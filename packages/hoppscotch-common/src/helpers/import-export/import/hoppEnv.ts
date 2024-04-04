@@ -1,31 +1,42 @@
-import * as TE from "fp-ts/TaskEither"
 import * as O from "fp-ts/Option"
+import * as TE from "fp-ts/TaskEither"
+import { entityReference } from "verzod"
 
-import { IMPORTER_INVALID_FILE_FORMAT } from "."
 import { safeParseJSON } from "~/helpers/functional/json"
+import { IMPORTER_INVALID_FILE_FORMAT } from "."
 
+import { Environment } from "@hoppscotch/data"
 import { z } from "zod"
 
-const hoppEnvSchema = z.object({
-  id: z.string().optional(),
-  name: z.string(),
-  variables: z.array(
-    z.object({
-      key: z.string(),
-      value: z.string(),
-    })
-  ),
-})
+export const hoppEnvImporter = (contents: string[]) => {
+  const parsedContents = contents.map((str) => safeParseJSON(str, true))
 
-export const hoppEnvImporter = (content: string) => {
-  const parsedContent = safeParseJSON(content, true)
-
-  // parse json from the environments string
-  if (O.isNone(parsedContent)) {
+  if (parsedContents.some((parsed) => O.isNone(parsed))) {
     return TE.left(IMPORTER_INVALID_FILE_FORMAT)
   }
 
-  const validationResult = z.array(hoppEnvSchema).safeParse(parsedContent.value)
+  const parsedValues = parsedContents.flatMap((content) => {
+    const unwrappedContent = O.toNullable(content) as Environment[] | null
+
+    if (unwrappedContent) {
+      return unwrappedContent.map((contentEntry) => {
+        return {
+          ...contentEntry,
+          variables: contentEntry.variables?.map((valueEntry) => ({
+            ...valueEntry,
+            ...("value" in valueEntry
+              ? { value: String(valueEntry.value) }
+              : {}),
+          })),
+        }
+      })
+    }
+    return null
+  })
+
+  const validationResult = z
+    .array(entityReference(Environment))
+    .safeParse(parsedValues)
 
   if (!validationResult.success) {
     return TE.left(IMPORTER_INVALID_FILE_FORMAT)

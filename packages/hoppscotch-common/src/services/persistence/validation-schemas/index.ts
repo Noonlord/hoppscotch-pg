@@ -45,6 +45,27 @@ const SettingsDefSchema = z.object({
   SIDEBAR: z.boolean(),
   SIDEBAR_ON_LEFT: z.boolean(),
   COLUMN_LAYOUT: z.boolean(),
+
+  WRAP_LINES: z.optional(
+    z.object({
+      httpRequestBody: z.boolean().catch(true),
+      httpResponseBody: z.boolean().catch(true),
+      httpHeaders: z.boolean().catch(true),
+      httpParams: z.boolean().catch(true),
+      httpUrlEncoded: z.boolean().catch(true),
+      httpPreRequest: z.boolean().catch(true),
+      httpTest: z.boolean().catch(true),
+      httpRequestVariables: z.boolean().catch(true),
+      graphqlQuery: z.boolean().catch(true),
+      graphqlResponseBody: z.boolean().catch(true),
+      graphqlHeaders: z.boolean().catch(false),
+      graphqlVariables: z.boolean().catch(false),
+      graphqlSchema: z.boolean().catch(true),
+      importCurl: z.boolean().catch(true),
+      codeGen: z.boolean().catch(true),
+      cookie: z.boolean().catch(true),
+    })
+  ),
 })
 
 // Common properties shared across REST & GQL collections
@@ -160,7 +181,6 @@ export const SELECTED_ENV_INDEX_SCHEMA = z.nullable(
       type: z.literal("TEAM_ENV"),
       teamID: z.string(),
       teamEnvID: z.string(),
-      // ! Versioned entity
       environment: entityReference(Environment),
     }),
   ])
@@ -210,17 +230,23 @@ export const MQTT_REQUEST_SCHEMA = z.nullable(
     .strict()
 )
 
-export const GLOBAL_ENV_SCHEMA = z.union([
-  z.array(z.never()),
-  z.array(
-    z
-      .object({
-        key: z.string(),
-        value: z.string(),
-      })
-      .strict()
-  ),
+const EnvironmentVariablesSchema = z.union([
+  z.object({
+    key: z.string(),
+    value: z.string(),
+    secret: z.literal(false).catch(false),
+  }),
+  z.object({
+    key: z.string(),
+    secret: z.literal(true),
+  }),
+  z.object({
+    key: z.string(),
+    value: z.string(),
+  }),
 ])
+
+export const GLOBAL_ENV_SCHEMA = z.array(EnvironmentVariablesSchema)
 
 const OperationTypeSchema = z.enum([
   "subscription",
@@ -339,12 +365,22 @@ const HoppTestDataSchema = z.lazy(() =>
     .strict()
 )
 
-const EnvironmentVariablesSchema = z
-  .object({
-    key: z.string(),
-    value: z.string(),
-  })
-  .strict()
+export const SECRET_ENVIRONMENT_VARIABLE_SCHEMA = z.union([
+  z.object({}).strict(),
+
+  z.record(
+    z.string(),
+    z.array(
+      z
+        .object({
+          key: z.string(),
+          value: z.string(),
+          varIndex: z.number(),
+        })
+        .strict()
+    )
+  ),
+])
 
 const HoppTestResultSchema = z
   .object({
@@ -358,7 +394,13 @@ const HoppTestResultSchema = z
           .object({
             additions: z.array(EnvironmentVariablesSchema),
             updations: z.array(
-              EnvironmentVariablesSchema.extend({ previousValue: z.string() })
+              EnvironmentVariablesSchema.refine(
+                (x) => "secret" in x && !x.secret
+              ).and(
+                z.object({
+                  previousValue: z.string(),
+                })
+              )
             ),
             deletions: z.array(EnvironmentVariablesSchema),
           })
@@ -367,7 +409,13 @@ const HoppTestResultSchema = z
           .object({
             additions: z.array(EnvironmentVariablesSchema),
             updations: z.array(
-              EnvironmentVariablesSchema.extend({ previousValue: z.string() })
+              EnvironmentVariablesSchema.refine(
+                (x) => "secret" in x && !x.secret
+              ).and(
+                z.object({
+                  previousValue: z.string(),
+                })
+              )
             ),
             deletions: z.array(EnvironmentVariablesSchema),
           })
@@ -467,6 +515,7 @@ const validRestOperations = [
   "authorization",
   "preRequestScript",
   "tests",
+  "requestVariables",
 ] as const
 
 export const REST_TAB_STATE_SCHEMA = z

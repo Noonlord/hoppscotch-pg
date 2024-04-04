@@ -26,12 +26,12 @@
           @click="clearContent()"
         />
         <HoppButtonSecondary
-          v-if="bulkMode"
+          v-if="bulkHeaders"
           v-tippy="{ theme: 'tooltip' }"
           :title="t('state.linewrap')"
-          :class="{ '!text-accent': linewrapEnabled }"
+          :class="{ '!text-accent': WRAP_LINES }"
           :icon="IconWrapText"
-          @click.prevent="linewrapEnabled = !linewrapEnabled"
+          @click.prevent="toggleNestedSetting('WRAP_LINES', 'httpHeaders')"
         />
         <HoppButtonSecondary
           v-tippy="{ theme: 'tooltip' }"
@@ -49,7 +49,9 @@
         />
       </div>
     </div>
-    <div v-if="bulkMode" ref="bulkEditor" class="flex flex-1 flex-col"></div>
+    <div v-if="bulkMode" class="h-full relative w-full">
+      <div ref="bulkEditor" class="absolute inset-0"></div>
+    </div>
     <div v-else>
       <draggable
         v-model="workingHeaders"
@@ -90,6 +92,8 @@
               :auto-complete-source="commonHeaders"
               :env-index="index"
               :inspection-results="getInspectorResult(headerKeyResults, index)"
+              :auto-complete-env="true"
+              :envs="envs"
               @change="
                 updateHeader(index, {
                   id: header.id,
@@ -106,6 +110,8 @@
                 getInspectorResult(headerValueResults, index)
               "
               :env-index="index"
+              :auto-complete-env="true"
+              :envs="envs"
               @change="
                 updateHeader(index, {
                   id: header.id,
@@ -301,6 +307,7 @@ import { useColorMode } from "@composables/theming"
 import { computed, reactive, ref, watch } from "vue"
 import { isEqual, cloneDeep } from "lodash-es"
 import {
+  HoppRESTAuth,
   HoppRESTHeader,
   HoppRESTRequest,
   parseRawKeyValueEntriesE,
@@ -327,11 +334,17 @@ import {
   getComputedHeaders,
   getComputedAuthHeaders,
 } from "~/helpers/utils/EffectiveURL"
-import { aggregateEnvs$, getAggregateEnvs } from "~/newstore/environments"
+import {
+  AggregateEnvironment,
+  aggregateEnvs$,
+  getAggregateEnvs,
+} from "~/newstore/environments"
 import { useVModel } from "@vueuse/core"
 import { useService } from "dioc/vue"
 import { InspectionService, InspectorResult } from "~/services/inspection"
 import { RESTTabService } from "~/services/tab/rest"
+import { useNestedSetting } from "~/composables/settings"
+import { toggleNestedSetting } from "~/newstore/settings"
 import { HoppInheritedProperty } from "~/helpers/types/HoppInheritedProperties"
 
 const t = useI18n()
@@ -346,15 +359,21 @@ const idTicker = ref(0)
 const bulkMode = ref(false)
 const bulkHeaders = ref("")
 const bulkEditor = ref<any | null>(null)
-const linewrapEnabled = ref(true)
+const WRAP_LINES = useNestedSetting("WRAP_LINES", "httpHeaders")
 
 const deletionToast = ref<{ goAway: (delay: number) => void } | null>(null)
 
 // v-model integration with props and emit
 const props = defineProps<{
-  modelValue: HoppRESTRequest
+  modelValue:
+    | HoppRESTRequest
+    | {
+        headers: HoppRESTHeader[]
+        auth: HoppRESTAuth
+      }
   isCollectionProperty?: boolean
   inheritedProperties?: HoppInheritedProperty
+  envs?: AggregateEnvironment[]
 }>()
 
 const emit = defineEmits<{
@@ -371,7 +390,7 @@ useCodemirror(
     extendedEditorConfig: {
       mode: "text/x-yaml",
       placeholder: `${t("state.bulk_mode_placeholder")}`,
-      lineWrapping: linewrapEnabled,
+      lineWrapping: WRAP_LINES,
     },
     linter,
     completer: null,
@@ -553,7 +572,7 @@ const clearContent = () => {
 const aggregateEnvs = useReadonlyStream(aggregateEnvs$, getAggregateEnvs())
 
 const computedHeaders = computed(() =>
-  getComputedHeaders(request.value, aggregateEnvs.value).map(
+  getComputedHeaders(request.value, aggregateEnvs.value, false).map(
     (header, index) => ({
       id: `header-${index}`,
       ...header,
@@ -606,7 +625,8 @@ const inheritedProperties = computed(() => {
   const computedAuthHeader = getComputedAuthHeaders(
     aggregateEnvs.value,
     request.value,
-    props.inheritedProperties.auth.inheritedAuth
+    props.inheritedProperties.auth.inheritedAuth,
+    false
   )[0]
 
   if (

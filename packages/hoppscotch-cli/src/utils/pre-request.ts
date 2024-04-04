@@ -36,7 +36,10 @@ import { toFormData } from "./mutators";
 export const preRequestScriptRunner = (
   request: HoppRESTRequest,
   envs: HoppEnvs
-): TE.TaskEither<HoppCLIError, EffectiveHoppRESTRequest> =>
+): TE.TaskEither<
+  HoppCLIError,
+  { effectiveRequest: EffectiveHoppRESTRequest } & { updatedEnvs: HoppEnvs }
+> =>
   pipe(
     TE.of(request),
     TE.chain(({ preRequestScript }) =>
@@ -68,7 +71,10 @@ export const preRequestScriptRunner = (
 export function getEffectiveRESTRequest(
   request: HoppRESTRequest,
   environment: Environment
-): E.Either<HoppCLIError, EffectiveHoppRESTRequest> {
+): E.Either<
+  HoppCLIError,
+  { effectiveRequest: EffectiveHoppRESTRequest } & { updatedEnvs: HoppEnvs }
+> {
   const envVariables = environment.variables;
 
   // Parsing final headers with applied ENVs.
@@ -103,18 +109,31 @@ export function getEffectiveRESTRequest(
         key: "Authorization",
         value: `Basic ${btoa(`${username}:${password}`)}`,
       });
-    } else if (
-      request.auth.authType === "bearer" ||
-      request.auth.authType === "oauth-2"
-    ) {
+    } else if (request.auth.authType === "bearer") {
       effectiveFinalHeaders.push({
         active: true,
         key: "Authorization",
-        value: `Bearer ${parseTemplateString(
-          request.auth.token,
-          envVariables
-        )}`,
+        value: `Bearer ${parseTemplateString(request.auth.token, envVariables)}`,
       });
+    } else if (request.auth.authType === "oauth-2") {
+      const { addTo } = request.auth;
+
+      if (addTo === "HEADERS") {
+        effectiveFinalHeaders.push({
+          active: true,
+          key: "Authorization",
+          value: `Bearer ${parseTemplateString(request.auth.grantTypeInfo.token, envVariables)}`,
+        });
+      } else if (addTo === "QUERY_PARAMS") {
+        effectiveFinalParams.push({
+          active: true,
+          key: "access_token",
+          value: parseTemplateString(
+            request.auth.grantTypeInfo.token,
+            envVariables
+          ),
+        });
+      }
     } else if (request.auth.authType === "api-key") {
       const { key, value, addTo } = request.auth;
       if (addTo === "Headers") {
@@ -162,12 +181,30 @@ export function getEffectiveRESTRequest(
   }
   const effectiveFinalURL = _effectiveFinalURL.right;
 
+  // Secret environment variables referenced in the request endpoint should be masked
+  let effectiveFinalDisplayURL;
+  if (envVariables.some(({ secret }) => secret)) {
+    const _effectiveFinalDisplayURL = parseTemplateStringE(
+      request.endpoint,
+      envVariables,
+      true
+    );
+
+    if (E.isRight(_effectiveFinalDisplayURL)) {
+      effectiveFinalDisplayURL = _effectiveFinalDisplayURL.right;
+    }
+  }
+
   return E.right({
-    ...request,
-    effectiveFinalURL,
-    effectiveFinalHeaders,
-    effectiveFinalParams,
-    effectiveFinalBody,
+    effectiveRequest: {
+      ...request,
+      effectiveFinalURL,
+      effectiveFinalDisplayURL,
+      effectiveFinalHeaders,
+      effectiveFinalParams,
+      effectiveFinalBody,
+    },
+    updatedEnvs: { global: [], selected: envVariables },
   });
 }
 

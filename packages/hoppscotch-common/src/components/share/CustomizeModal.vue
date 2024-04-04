@@ -225,10 +225,10 @@ const props = defineProps({
   embedOptions: {
     type: Object as PropType<EmbedOption>,
     default: () => ({
-      selectedTab: "parameters",
+      selectedTab: "params",
       tabs: [
         {
-          value: "parameters",
+          value: "params",
           label: "shared_requests.parameters",
           enabled: true,
         },
@@ -290,7 +290,12 @@ const widgets: Widget[] = [
   },
 ]
 
-type EmbedTabs = "parameters" | "body" | "headers" | "authorization"
+type EmbedTabs =
+  | "params"
+  | "bodyParams"
+  | "headers"
+  | "authorization"
+  | "requestVariables"
 
 type EmbedOption = {
   selectedTab: EmbedTabs

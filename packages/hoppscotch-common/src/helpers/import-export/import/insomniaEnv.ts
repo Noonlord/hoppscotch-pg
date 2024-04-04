@@ -4,8 +4,9 @@ import * as O from "fp-ts/Option"
 import { IMPORTER_INVALID_FILE_FORMAT } from "."
 
 import { z } from "zod"
-import { Environment } from "@hoppscotch/data"
+import { NonSecretEnvironment } from "@hoppscotch/data"
 import { safeParseJSONOrYAML } from "~/helpers/functional/yaml"
+import { uniqueID } from "~/helpers/utils/uniqueID"
 
 const insomniaResourcesSchema = z.object({
   resources: z.array(
@@ -28,44 +29,49 @@ export const replaceInsomniaTemplating = (expression: string) => {
   return expression.replaceAll(regex, "<<$1>>")
 }
 
-export const insomniaEnvImporter = (content: string) => {
-  const parsedContent = safeParseJSONOrYAML(content)
-
-  if (O.isNone(parsedContent)) {
+export const insomniaEnvImporter = (contents: string[]) => {
+  const parsedContents = contents.map((str) => safeParseJSONOrYAML(str))
+  if (parsedContents.some((parsed) => O.isNone(parsed))) {
     return TE.left(IMPORTER_INVALID_FILE_FORMAT)
   }
 
-  const validationResult = insomniaResourcesSchema.safeParse(
-    parsedContent.value
-  )
+  const parsedValues = parsedContents.map((parsed) => O.toNullable(parsed))
+
+  const validationResult = z
+    .array(insomniaResourcesSchema)
+    .safeParse(parsedValues)
 
   if (!validationResult.success) {
     return TE.left(IMPORTER_INVALID_FILE_FORMAT)
   }
 
-  const insomniaEnvs = validationResult.data.resources
-    .filter((resource) => resource._type === "environment")
-    .map((envResource) => {
-      const envResourceData = envResource.data as Record<string, unknown>
-      const stringifiedData: Record<string, string> = {}
+  const insomniaEnvs = validationResult.data.flatMap(({ resources }) => {
+    return resources
+      .filter((resource) => resource._type === "environment")
+      .map((envResource) => {
+        const envResourceData = envResource.data as Record<string, unknown>
+        const stringifiedData: Record<string, string> = {}
 
-      Object.keys(envResourceData).forEach((key) => {
-        stringifiedData[key] = String(envResourceData[key])
+        Object.keys(envResourceData).forEach((key) => {
+          stringifiedData[key] = String(envResourceData[key])
+        })
+
+        return { ...envResource, data: stringifiedData }
       })
+  })
 
-      return { ...envResource, data: stringifiedData }
-    })
-
-  const environments: Environment[] = []
+  const environments: NonSecretEnvironment[] = []
 
   insomniaEnvs.forEach((insomniaEnv) => {
     const parsedInsomniaEnv = insomniaEnvSchema.safeParse(insomniaEnv)
 
     if (parsedInsomniaEnv.success) {
-      const environment: Environment = {
+      const environment: NonSecretEnvironment = {
+        id: uniqueID(),
+        v: 1,
         name: parsedInsomniaEnv.data.name,
         variables: Object.entries(parsedInsomniaEnv.data.data).map(
-          ([key, value]) => ({ key, value })
+          ([key, value]) => ({ key, value, secret: false })
         ),
       }
 

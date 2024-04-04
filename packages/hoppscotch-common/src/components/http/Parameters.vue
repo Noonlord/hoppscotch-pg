@@ -24,9 +24,9 @@
           v-if="bulkMode"
           v-tippy="{ theme: 'tooltip' }"
           :title="t('state.linewrap')"
-          :class="{ '!text-accent': linewrapEnabled }"
+          :class="{ '!text-accent': WRAP_LINES }"
           :icon="IconWrapText"
-          @click.prevent="linewrapEnabled = !linewrapEnabled"
+          @click.prevent="toggleNestedSetting('WRAP_LINES', 'httpParams')"
         />
         <HoppButtonSecondary
           v-tippy="{ theme: 'tooltip' }"
@@ -44,7 +44,9 @@
         />
       </div>
     </div>
-    <div v-if="bulkMode" ref="bulkEditor" class="flex flex-1 flex-col"></div>
+    <div v-if="bulkMode" class="h-full relative">
+      <div ref="bulkEditor" class="absolute inset-0"></div>
+    </div>
     <div v-else>
       <draggable
         v-model="workingParams"
@@ -85,6 +87,8 @@
               :inspection-results="
                 getInspectorResult(parameterKeyResults, index)
               "
+              :auto-complete-env="true"
+              :envs="envs"
               @change="
                 updateParam(index, {
                   id: param.id,
@@ -100,6 +104,8 @@
               :inspection-results="
                 getInspectorResult(parameterValueResults, index)
               "
+              :auto-complete-env="true"
+              :envs="envs"
               @change="
                 updateParam(index, {
                   id: param.id,
@@ -205,6 +211,9 @@ import { useVModel } from "@vueuse/core"
 import { useService } from "dioc/vue"
 import { InspectionService, InspectorResult } from "~/services/inspection"
 import { RESTTabService } from "~/services/tab/rest"
+import { useNestedSetting } from "~/composables/settings"
+import { toggleNestedSetting } from "~/newstore/settings"
+import { AggregateEnvironment } from "~/newstore/environments"
 
 const colorMode = useColorMode()
 
@@ -217,7 +226,7 @@ const idTicker = ref(0)
 const bulkMode = ref(false)
 const bulkParams = ref("")
 const bulkEditor = ref<any | null>(null)
-const linewrapEnabled = ref(true)
+const WRAP_LINES = useNestedSetting("WRAP_LINES", "httpParams")
 
 const deletionToast = ref<{ goAway: (delay: number) => void } | null>(null)
 
@@ -228,7 +237,7 @@ useCodemirror(
     extendedEditorConfig: {
       mode: "text/x-yaml",
       placeholder: `${t("state.bulk_mode_placeholder")}`,
-      lineWrapping: linewrapEnabled,
+      lineWrapping: WRAP_LINES,
     },
     linter,
     completer: null,
@@ -238,6 +247,7 @@ useCodemirror(
 
 const props = defineProps<{
   modelValue: HoppRESTParam[]
+  envs?: AggregateEnvironment[]
 }>()
 
 const emit = defineEmits<{

@@ -127,9 +127,9 @@
           <HoppButtonSecondary
             v-tippy="{ theme: 'tooltip' }"
             :title="t('state.linewrap')"
-            :class="{ '!text-accent': linewrapEnabled }"
+            :class="{ '!text-accent': WRAP_LINES }"
             :icon="IconWrapText"
-            @click.prevent="linewrapEnabled = !linewrapEnabled"
+            @click.prevent="toggleNestedSetting('WRAP_LINES', 'graphqlSchema')"
           />
           <HoppButtonSecondary
             v-tippy="{ theme: 'tooltip' }"
@@ -145,11 +145,9 @@
           />
         </div>
       </div>
-      <div
-        v-if="schemaString"
-        ref="schemaEditor"
-        class="flex flex-1 flex-col"
-      ></div>
+      <div v-if="schemaString" class="h-full relative w-full">
+        <div ref="schemaEditor" class="absolute inset-0"></div>
+      </div>
       <HoppSmartPlaceholder
         v-else
         :src="`/images/states/${colorMode.value}/blockchain.svg`"
@@ -187,7 +185,7 @@ import IconClock from "~icons/lucide/clock"
 import IconCopy from "~icons/lucide/copy"
 import IconBox from "~icons/lucide/box"
 import { computed, nextTick, reactive, ref } from "vue"
-import { GraphQLField, GraphQLType } from "graphql"
+import { GraphQLField, GraphQLType, getNamedType } from "graphql"
 import { refAutoReset } from "@vueuse/core"
 import { useCodemirror } from "@composables/codemirror"
 import { copyToClipboard } from "@helpers/utils/clipboard"
@@ -202,6 +200,8 @@ import {
   subscriptionFields,
 } from "~/helpers/graphql/connection"
 import { platform } from "~/platform"
+import { useNestedSetting } from "~/composables/settings"
+import { toggleNestedSetting } from "~/newstore/settings"
 
 type NavigationTabs = "history" | "collection" | "docs" | "schema"
 type GqlTabs = "queries" | "mutations" | "subscriptions" | "types"
@@ -258,12 +258,6 @@ function getFilteredGraphqlTypes(filterText: string, types: GraphQLType[]) {
 
     return isFilterTextMatchingAtLeastOneField
   })
-}
-
-function resolveRootType(type: GraphQLType) {
-  let t: any = type
-  while (t.ofType) t = t.ofType
-  return t
 }
 
 const toast = useToast()
@@ -331,7 +325,7 @@ const handleJumpToType = async (type: GraphQLType) => {
   selectedGqlTab.value = "types"
   await nextTick()
 
-  const rootTypeName = resolveRootType(type).name
+  const rootTypeName = getNamedType(type).name
   const target = document.getElementById(`type_${rootTypeName}`)
   if (target) {
     target.scrollIntoView({ block: "center", behavior: "smooth" })
@@ -355,7 +349,7 @@ const handleJumpToType = async (type: GraphQLType) => {
 }
 
 const schemaEditor = ref<any | null>(null)
-const linewrapEnabled = ref(true)
+const WRAP_LINES = useNestedSetting("WRAP_LINES", "graphqlSchema")
 
 useCodemirror(
   schemaEditor,
@@ -364,7 +358,7 @@ useCodemirror(
     extendedEditorConfig: {
       mode: "graphql",
       readOnly: true,
-      lineWrapping: linewrapEnabled,
+      lineWrapping: WRAP_LINES,
     },
     linter: null,
     completer: null,
