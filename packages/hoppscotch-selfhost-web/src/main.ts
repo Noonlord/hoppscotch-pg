@@ -11,6 +11,7 @@ import { ExtensionInterceptorService } from "@hoppscotch/common/platform/std/int
 import { stdFooterItems } from "@hoppscotch/common/platform/std/ui/footerItem"
 import { stdSupportOptionItems } from "@hoppscotch/common/platform/std/ui/supportOptionsItem"
 import { browserIODef } from "@hoppscotch/common/platform/std/io"
+import { InfraPlatform } from "@platform/infra/infra.platform"
 
 createHoppApp("#app", {
   ui: {
@@ -39,5 +40,7 @@ createHoppApp("#app", {
   platformFeatureFlags: {
     exportAsGIST: false,
     hasTelemetry: false,
+    duplicateCollectionDisabledInPersonalWorkspace: true,
   },
+  infra: InfraPlatform,
 })

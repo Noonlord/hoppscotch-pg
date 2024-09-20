@@ -16,13 +16,13 @@
     >
       <Splitpanes
         class="smart-splitter"
-        :horizontal="COLUMN_LAYOUT"
+        :horizontal="COLUMN_LAYOUT || forceColumnLayout"
         @resize="setPaneEvent($event, 'horizontal')"
       >
         <Pane
           :size="PANE_MAIN_TOP_SIZE"
           class="flex flex-col !overflow-auto"
-          min-size="25"
+          :min-size="isEmbed ? 12 : 25"
         >
           <slot name="primary" />
         </Pane>
@@ -77,6 +77,14 @@ const props = defineProps({
   layoutId: {
     type: String,
     default: null,
+  },
+  isEmbed: {
+    type: Boolean,
+    defaul: false,
+  },
+  forceColumnLayout: {
+    type: Boolean,
+    default: false,
   },
 })
 

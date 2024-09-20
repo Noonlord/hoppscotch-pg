@@ -1,6 +1,5 @@
 import { Service } from "dioc"
-import { reactive } from "vue"
-import { computed } from "vue"
+import { reactive, computed } from "vue"
 
 /**
  * Defines a secret environment variable.
@@ -26,10 +25,6 @@ export class SecretEnvironmentService extends Service {
    * The value is the list of secret variables.
    */
   public secretEnvironments = reactive(new Map<string, SecretVariable[]>())
-
-  constructor() {
-    super()
-  }
 
   /**
    * Add a new secret environment.

@@ -79,6 +79,7 @@ const parseOpenAPIParams = (params: OpenAPIParamsType[]): HoppRESTParam[] =>
               key: param.name,
               value: "", // TODO: Can we do anything more ? (parse default values maybe)
               active: true,
+              description: param.description ?? "",
             }
         )
       )
@@ -113,14 +114,14 @@ const parseOpenAPIHeaders = (params: OpenAPIParamsType[]): HoppRESTHeader[] =>
     A.filterMap(
       flow(
         O.fromPredicate((param) => param.in === "header"),
-        O.map(
-          (header) =>
-            <HoppRESTParam>{
-              key: header.name,
-              value: "", // TODO: Can we do anything more ? (parse default values maybe)
-              active: true,
-            }
-        )
+        O.map((header) => {
+          return <HoppRESTParam>{
+            key: header.name,
+            value: "", // TODO: Can we do anything more ? (parse default values maybe)
+            active: true,
+            description: header.description ?? "",
+          }
+        })
       )
     )
   )
@@ -260,7 +261,7 @@ const resolveOpenAPIV3SecurityObj = (
       return {
         authType: "api-key",
         authActive: true,
-        addTo: "Headers",
+        addTo: "HEADERS",
         key: scheme.name,
         value: "",
       }
@@ -268,7 +269,7 @@ const resolveOpenAPIV3SecurityObj = (
       return {
         authType: "api-key",
         authActive: true,
-        addTo: "Query params",
+        addTo: "QUERY_PARAMS",
         key: scheme.in,
         value: "",
       }
@@ -430,7 +431,7 @@ const resolveOpenAPIV2SecurityScheme = (
     // V2 only supports in: header and in: query
     return {
       authType: "api-key",
-      addTo: scheme.in === "header" ? "Headers" : "Query params",
+      addTo: scheme.in === "header" ? "HEADERS" : "QUERY_PARAMS",
       authActive: true,
       key: scheme.name,
       value: "",

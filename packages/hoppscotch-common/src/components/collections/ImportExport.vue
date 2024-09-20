@@ -24,6 +24,7 @@ import {
   hoppPostmanImporter,
   toTeamsImporter,
   hoppOpenAPIImporter,
+  harImporter,
 } from "~/helpers/import-export/import/importers"
 
 import { defineStep } from "~/composables/step-components"
@@ -32,7 +33,6 @@ import { useI18n } from "~/composables/i18n"
 import { useToast } from "~/composables/toast"
 import { appendRESTCollections, restCollections$ } from "~/newstore/collections"
 import MyCollectionImport from "~/components/importExport/ImportExportSteps/MyCollectionImport.vue"
-import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
 
 import IconFolderPlus from "~icons/lucide/folder-plus"
 import IconOpenAPI from "~icons/lucide/file"
@@ -48,23 +48,22 @@ import { getTeamCollectionJSON } from "~/helpers/backend/helpers"
 
 import { platform } from "~/platform"
 
-import { initializeDownloadCollection } from "~/helpers/import-export/export"
+import { initializeDownloadFile } from "~/helpers/import-export/export"
 import { gistExporter } from "~/helpers/import-export/export/gist"
 import { myCollectionsExporter } from "~/helpers/import-export/export/myCollections"
 import { teamCollectionsExporter } from "~/helpers/import-export/export/teamCollections"
 
 import { GistSource } from "~/helpers/import-export/import/import-sources/GistSource"
 import { ImporterOrExporter } from "~/components/importExport/types"
+import { TeamWorkspace } from "~/services/workspace.service"
 
 const t = useI18n()
 const toast = useToast()
 
-type SelectedTeam = GetMyTeamsQuery["myTeams"][number] | undefined
-
 type CollectionType =
   | {
       type: "team-collections"
-      selectedTeam: SelectedTeam
+      selectedTeam: TeamWorkspace
     }
   | { type: "my-collections" }
 
@@ -390,26 +389,28 @@ const HoppMyCollectionsExporter: ImporterOrExporter = {
     applicableTo: ["personal-workspace"],
     isLoading: isHoppMyCollectionExporterInProgress,
   },
-  action: () => {
+  action: async () => {
     if (!myCollections.value.length) {
       return toast.error(t("error.no_collections_to_export"))
     }
 
     isHoppMyCollectionExporterInProgress.value = true
 
-    const message = initializeDownloadCollection(
+    const message = await initializeDownloadFile(
       myCollectionsExporter(myCollections.value),
-      "Collections"
+      "hoppscotch-personal-collections"
     )
 
     if (E.isRight(message)) {
-      toast.success(t(message.right))
+      toast.success(t("state.download_started"))
 
       platform.analytics?.logEvent({
         type: "HOPP_EXPORT_COLLECTION",
         exporter: "json",
         platform: "rest",
       })
+    } else {
+      toast.error(t(message.left))
     }
 
     isHoppMyCollectionExporterInProgress.value = false
@@ -420,7 +421,7 @@ const HoppTeamCollectionsExporter: ImporterOrExporter = {
   metadata: {
     id: "hopp_team_collections",
     name: "export.as_json",
-    title: "export.as_json_description",
+    title: "export.as_json",
     icon: IconUser,
     disabled: false,
     applicableTo: ["team-workspace"],
@@ -433,22 +434,18 @@ const HoppTeamCollectionsExporter: ImporterOrExporter = {
       props.collectionsType.selectedTeam
     ) {
       const res = await teamCollectionsExporter(
-        props.collectionsType.selectedTeam.id
+        props.collectionsType.selectedTeam.teamID
       )
 
       if (E.isRight(res)) {
-        const { exportCollectionsToJSON } = res.right
-
-        if (!JSON.parse(exportCollectionsToJSON).length) {
-          isHoppTeamCollectionExporterInProgress.value = false
-
-          return toast.error(t("error.no_collections_to_export"))
-        }
-
-        initializeDownloadCollection(
-          exportCollectionsToJSON,
-          "team-collections"
+        const message = await initializeDownloadFile(
+          res.right,
+          "hoppscotch-team-collections"
         )
+
+        E.isRight(message)
+          ? toast.success(t(message.right))
+          : toast.error(t(message.left))
 
         platform.analytics?.logEvent({
           type: "HOPP_EXPORT_COLLECTION",
@@ -456,7 +453,7 @@ const HoppTeamCollectionsExporter: ImporterOrExporter = {
           platform: "rest",
         })
       } else {
-        toast.error(res.left.error.toString())
+        toast.error(res.left)
       }
     }
 
@@ -494,11 +491,6 @@ const HoppGistCollectionsExporter: ImporterOrExporter = {
     }
 
     if (E.isRight(collectionJSON)) {
-      if (!JSON.parse(collectionJSON.right).length) {
-        isHoppGistCollectionExporterInProgress.value = false
-        return toast.error(t("error.no_collections_to_export"))
-      }
-
       const res = await gistExporter(collectionJSON.right, accessToken)
 
       if (E.isLeft(res)) {
@@ -515,10 +507,44 @@ const HoppGistCollectionsExporter: ImporterOrExporter = {
       })
 
       platform.io.openExternalLink(res.right)
+    } else {
+      toast.error(collectionJSON.left)
     }
 
     isHoppGistCollectionExporterInProgress.value = false
   },
+}
+
+const HARImporter: ImporterOrExporter = {
+  metadata: {
+    id: "har",
+    name: "import.from_har",
+    title: "import.from_har_description",
+    icon: IconFile,
+    disabled: false,
+    applicableTo: ["personal-workspace", "team-workspace"],
+  },
+  component: FileSource({
+    caption: "import.from_file",
+    acceptedFileTypes: ".har",
+    onImportFromFile: async (content) => {
+      const res = await harImporter(content)
+
+      if (E.isLeft(res)) {
+        showImportFailedError()
+        return
+      }
+
+      handleImportToStore(res.right)
+
+      platform.analytics?.logEvent({
+        type: "HOPP_IMPORT_COLLECTION",
+        importer: "import.from_har",
+        platform: "rest",
+        workspaceType: isTeamWorkspace.value ? "team" : "personal",
+      })
+    },
+  }),
 }
 
 const importerModules = computed(() => {
@@ -529,6 +555,7 @@ const importerModules = computed(() => {
     HoppPostmanImporter,
     HoppInsomniaImporter,
     HoppGistImporter,
+    HARImporter,
   ]
 
   const isTeams = props.collectionsType.type === "team-collections"
@@ -569,8 +596,8 @@ const hasTeamWriteAccess = computed(() => {
   }
 
   return (
-    collectionsType.selectedTeam.myRole === "EDITOR" ||
-    collectionsType.selectedTeam.myRole === "OWNER"
+    collectionsType.selectedTeam.role === "EDITOR" ||
+    collectionsType.selectedTeam.role === "OWNER"
   )
 })
 
@@ -578,22 +605,20 @@ const selectedTeamID = computed(() => {
   const { collectionsType } = props
 
   return collectionsType.type === "team-collections"
-    ? collectionsType.selectedTeam?.id
+    ? collectionsType.selectedTeam?.teamID
     : undefined
 })
 
 const getCollectionJSON = async () => {
   if (
     props.collectionsType.type === "team-collections" &&
-    props.collectionsType.selectedTeam?.id
+    props.collectionsType.selectedTeam?.teamID
   ) {
     const res = await getTeamCollectionJSON(
-      props.collectionsType.selectedTeam?.id
+      props.collectionsType.selectedTeam?.teamID
     )
 
-    return E.isRight(res)
-      ? E.right(res.right.exportCollectionsToJSON)
-      : E.left(res.left)
+    return E.isRight(res) ? E.right(res.right) : E.left(res.left)
   }
 
   if (props.collectionsType.type === "my-collections") {

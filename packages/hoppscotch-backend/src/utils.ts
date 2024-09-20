@@ -1,22 +1,24 @@
 import { ExecutionContext, HttpException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import { Prisma } from '@prisma/client';
+import * as A from 'fp-ts/Array';
+import * as E from 'fp-ts/Either';
 import { pipe } from 'fp-ts/lib/function';
 import * as O from 'fp-ts/Option';
-import * as TE from 'fp-ts/TaskEither';
 import * as T from 'fp-ts/Task';
-import * as E from 'fp-ts/Either';
-import * as A from 'fp-ts/Array';
-import { TeamMemberRole } from './team/team.model';
-import { User } from './user/user.model';
+import * as TE from 'fp-ts/TaskEither';
+import { AuthProvider } from './auth/helper';
 import {
   ENV_EMPTY_AUTH_PROVIDERS,
   ENV_NOT_FOUND_KEY_AUTH_PROVIDERS,
+  ENV_NOT_FOUND_KEY_DATA_ENCRYPTION_KEY,
   ENV_NOT_SUPPORT_AUTH_PROVIDERS,
   JSON_INVALID,
 } from './errors';
-import { AuthProvider } from './auth/helper';
+import { TeamMemberRole } from './team/team.model';
 import { RESTError } from './types/RESTError';
+import * as crypto from 'crypto';
 
 /**
  * A workaround to throw an exception in an expression.
@@ -285,4 +287,88 @@ export function escapeSqlLikeString(str: string) {
       // and double/single quotes
     }
   });
+}
+
+/**
+ * Calculate the expiration date of the token
+ *
+ * @param expiresOn Number of days the token is valid for
+ * @returns Date object of the expiration date
+ */
+export function calculateExpirationDate(expiresOn: null | number) {
+  if (expiresOn === null) return null;
+  return new Date(Date.now() + expiresOn * 24 * 60 * 60 * 1000);
+}
+
+/*
+ * Transforms the collection level properties (authorization & headers) under the `data` field.
+ * Preserves `null` values and prevents duplicate stringification.
+ *
+ * @param {Prisma.JsonValue} collectionData - The team collection data to transform.
+ * @returns {string | null} The transformed team collection data as a string.
+ */
+export function transformCollectionData(
+  collectionData: Prisma.JsonValue,
+): string | null {
+  if (!collectionData) {
+    return null;
+  }
+
+  return typeof collectionData === 'string'
+    ? collectionData
+    : JSON.stringify(collectionData);
+}
+
+// Encrypt and Decrypt functions. InfraConfig and Account table uses these functions to encrypt and decrypt the data.
+const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
+
+/**
+ * Encrypts a text using a key
+ * @param text The text to encrypt
+ * @param key The key to use for encryption
+ * @returns The encrypted text
+ */
+export function encrypt(text: string, key = process.env.DATA_ENCRYPTION_KEY) {
+  if (!key) throw new Error(ENV_NOT_FOUND_KEY_DATA_ENCRYPTION_KEY);
+
+  if (text === null || text === undefined) return text;
+
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(
+    ENCRYPTION_ALGORITHM,
+    Buffer.from(key),
+    iv,
+  );
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+/**
+ * Decrypts a text using a key
+ * @param text The text to decrypt
+ * @param key The key to use for decryption
+ * @returns The decrypted text
+ */
+export function decrypt(
+  encryptedData: string,
+  key = process.env.DATA_ENCRYPTION_KEY,
+) {
+  if (!key) throw new Error(ENV_NOT_FOUND_KEY_DATA_ENCRYPTION_KEY);
+
+  if (encryptedData === null || encryptedData === undefined) {
+    return encryptedData;
+  }
+
+  const textParts = encryptedData.split(':');
+  const iv = Buffer.from(textParts.shift(), 'hex');
+  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+  const decipher = crypto.createDecipheriv(
+    ENCRYPTION_ALGORITHM,
+    Buffer.from(key),
+    iv,
+  );
+  let decrypted = decipher.update(encryptedText);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
 }

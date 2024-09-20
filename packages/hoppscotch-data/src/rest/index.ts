@@ -1,43 +1,50 @@
 import * as Eq from "fp-ts/Eq"
 import * as S from "fp-ts/string"
 import cloneDeep from "lodash/cloneDeep"
-import V0_VERSION from "./v/0"
-import V1_VERSION from "./v/1"
-import V2_VERSION from "./v/2"
-import V3_VERSION from "./v/3"
 import { createVersionedEntity, InferredEntity } from "verzod"
+import { z } from "zod"
+
 import { lodashIsEqualEq, mapThenEq, undefinedEq } from "../utils/eq"
 
-import { HoppRESTReqBody, HoppRESTHeaders, HoppRESTParams } from "./v/1"
+import V0_VERSION from "./v/0"
+import V1_VERSION from "./v/1"
+import V2_VERSION, { HoppRESTRequestVariables } from "./v/2"
+import V3_VERSION from "./v/3"
+import V4_VERSION from "./v/4"
+import V5_VERSION from "./v/5"
+import V6_VERSION, { HoppRESTReqBody } from "./v/6"
+import V7_VERSION, { HoppRESTAuth } from "./v/7"
 
-import { HoppRESTAuth } from "./v/3"
-import { HoppRESTRequestVariables } from "./v/2"
-import { z } from "zod"
+import { HoppRESTParams, HoppRESTHeaders } from "./v/7"
 
 export * from "./content-types"
 
 export {
   FormDataKeyValue,
-  HoppRESTReqBodyFormData,
-  HoppRESTAuthAPIKey,
   HoppRESTAuthBasic,
-  HoppRESTAuthInherit,
   HoppRESTAuthBearer,
+  HoppRESTAuthInherit,
   HoppRESTAuthNone,
-  HoppRESTReqBody,
-  HoppRESTHeaders,
+  HoppRESTReqBodyFormData,
 } from "./v/1"
-
 export {
-  HoppRESTAuth,
-  HoppRESTAuthOAuth2,
-  AuthCodeGrantTypeParams,
   ClientCredentialsGrantTypeParams,
   ImplicitOauthFlowParams,
   PasswordGrantTypeParams,
 } from "./v/3"
 
 export { HoppRESTRequestVariables } from "./v/2"
+export { HoppRESTAuthAPIKey } from "./v/4"
+
+export { AuthCodeGrantTypeParams } from "./v/5"
+export { HoppRESTReqBody } from "./v/6"
+export {
+  HoppRESTAuth,
+  HoppRESTAuthAWSSignature,
+  HoppRESTAuthOAuth2,
+  HoppRESTHeaders,
+  HoppRESTParams,
+} from "./v/7"
 
 const versionedObject = z.object({
   // v is a stringified number
@@ -45,12 +52,16 @@ const versionedObject = z.object({
 })
 
 export const HoppRESTRequest = createVersionedEntity({
-  latestVersion: 3,
+  latestVersion: 7,
   versionMap: {
     0: V0_VERSION,
     1: V1_VERSION,
     2: V2_VERSION,
     3: V3_VERSION,
+    4: V4_VERSION,
+    5: V5_VERSION,
+    6: V6_VERSION,
+    7: V7_VERSION,
   },
   getVersion(data) {
     // For V1 onwards we have the v string storing the number
@@ -92,7 +103,7 @@ const HoppRESTRequestEq = Eq.struct<HoppRESTRequest>({
   ),
 })
 
-export const RESTReqSchemaVersion = "3"
+export const RESTReqSchemaVersion = "7"
 
 export type HoppRESTParam = HoppRESTRequest["params"][number]
 export type HoppRESTHeader = HoppRESTRequest["headers"][number]
@@ -144,6 +155,7 @@ export function safelyExtractRESTRequest(
       const result = HoppRESTAuth.safeParse(x.auth)
 
       if (result.success) {
+        //  @ts-ignore
         req.auth = result.data
       }
     }
@@ -187,7 +199,7 @@ export function makeRESTRequest(
 
 export function getDefaultRESTRequest(): HoppRESTRequest {
   return {
-    v: "3",
+    v: RESTReqSchemaVersion,
     endpoint: "https://echo.hoppscotch.io",
     name: "Untitled",
     params: [],

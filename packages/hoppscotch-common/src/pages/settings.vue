@@ -83,6 +83,14 @@
                   {{ t("settings.sidebar_on_left") }}
                 </HoppSmartToggle>
               </div>
+              <div v-if="hasAIExperimentsSupport" class="flex items-center">
+                <HoppSmartToggle
+                  :on="ENABLE_AI_EXPERIMENTS"
+                  @change="toggleSetting('ENABLE_AI_EXPERIMENTS')"
+                >
+                  {{ t("settings.ai_experiments") }}
+                </HoppSmartToggle>
+              </div>
             </div>
           </section>
         </div>
@@ -98,6 +106,12 @@
           </p>
         </div>
         <div class="space-y-8 p-8 md:col-span-2">
+          <section class="flex flex-col space-y-2">
+            <h4 class="font-semibold text-secondaryDark">
+              {{ t("settings.interceptor") }}
+            </h4>
+            <AppInterceptor :is-tooltip-component="false" />
+          </section>
           <section v-for="[id, settings] in interceptorsWithSettings" :key="id">
             <h4 class="font-semibold text-secondaryDark">
               {{ settings.entryTitle(t) }}
@@ -173,6 +187,7 @@ const PROXY_URL = useSetting("PROXY_URL")
 const TELEMETRY_ENABLED = useSetting("TELEMETRY_ENABLED")
 const EXPAND_NAVIGATION = useSetting("EXPAND_NAVIGATION")
 const SIDEBAR_ON_LEFT = useSetting("SIDEBAR_ON_LEFT")
+const ENABLE_AI_EXPERIMENTS = useSetting("ENABLE_AI_EXPERIMENTS")
 
 const hasPlatformTelemetry = Boolean(platform.platformFeatureFlags.hasTelemetry)
 
@@ -181,6 +196,9 @@ const confirmRemove = ref(false)
 const proxySettings = computed(() => ({
   url: PROXY_URL.value,
 }))
+
+const hasAIExperimentsSupport =
+  !!platform.experiments?.aiExperiments?.enableAIExperiments
 
 watch(
   proxySettings,

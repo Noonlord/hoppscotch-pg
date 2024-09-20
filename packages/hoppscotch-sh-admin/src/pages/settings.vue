@@ -24,6 +24,9 @@
           class="py-8 px-4"
         />
       </HoppSmartTab>
+      <HoppSmartTab :id="'token'" :label="t('infra_tokens.tab_title')">
+        <Tokens />
+      </HoppSmartTab>
     </HoppSmartTabs>
   </div>
 
@@ -37,6 +40,7 @@
   <SettingsServerRestart
     v-if="initiateServerRestart"
     :workingConfigs="workingConfigs"
+    @mutation-failure="initiateServerRestart = false"
   />
 
   <HoppSmartConfirmModal
@@ -61,7 +65,7 @@ const showSaveChangesModal = ref(false);
 const initiateServerRestart = ref(false);
 
 // Tabs
-type OptionTabs = 'config';
+type OptionTabs = 'config' | 'token';
 const selectedOptionTab = ref<OptionTabs>('config');
 
 // Obtain the current and working configs from the useConfigHandler composable

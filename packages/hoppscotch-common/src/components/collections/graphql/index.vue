@@ -54,6 +54,7 @@
         @add-request="addRequest($event)"
         @add-folder="addFolder($event)"
         @edit-folder="editFolder($event)"
+        @duplicate-collection="duplicateCollection($event)"
         @edit-request="editRequest($event)"
         @duplicate-request="duplicateRequest($event)"
         @select-collection="$emit('use-collection', collection)"
@@ -115,6 +116,7 @@
     <CollectionsGraphqlAddRequest
       :show="showModalAddRequest"
       :folder-path="editingFolderPath"
+      :request-context="requestContext"
       @add-request="onAddRequest($event)"
       @hide-modal="displayModalAddRequest(false)"
     />
@@ -138,6 +140,7 @@
       :folder-path="editingFolderPath"
       :request="editingRequest"
       :request-index="editingRequestIndex"
+      :request-context="editingRequest"
       :editing-request-name="editingRequest ? editingRequest.name : ''"
       @hide-modal="displayModalEditRequest(false)"
     />
@@ -167,6 +170,7 @@ import {
   editGraphqlCollection,
   editGraphqlFolder,
   moveGraphqlRequest,
+  duplicateGraphQLCollection,
 } from "~/newstore/collections"
 import IconPlus from "~icons/lucide/plus"
 import IconHelpCircle from "~icons/lucide/help-circle"
@@ -192,6 +196,7 @@ import { PersistenceService } from "~/services/persistence"
 import { PersistedOAuthConfig } from "~/services/oauth/oauth.service"
 import { GQLOptionTabs } from "~/components/graphql/RequestOptions.vue"
 import { EditingProperties } from "../Properties.vue"
+import { defineActionHandler } from "~/helpers/actions"
 
 const t = useI18n()
 const toast = useToast()
@@ -199,7 +204,7 @@ const toast = useToast()
 defineProps<{
   // Whether to activate the ability to pick items (activates 'select' events)
   saveRequest: boolean
-  picked: Picked
+  picked: Picked | null
 }>()
 
 const collections = useReadonlyStream(graphqlCollections$, [], "deep")
@@ -250,7 +255,7 @@ onMounted(() => {
     return
   }
 
-  const { context, source, token }: PersistedOAuthConfig =
+  const { context, source, token, refresh_token }: PersistedOAuthConfig =
     JSON.parse(localOAuthTempConfig)
 
   if (source === "REST") {
@@ -274,6 +279,10 @@ onMounted(() => {
         const grantTypeInfo = auth.grantTypeInfo
 
         grantTypeInfo && (grantTypeInfo.token = token ?? "")
+
+        if (refresh_token && grantTypeInfo.grantType === "AUTHORIZATION_CODE") {
+          grantTypeInfo.refreshToken = refresh_token
+        }
       }
 
       editingProperties.value = unsavedCollectionProperties
@@ -324,6 +333,10 @@ const filteredCollections = computed(() => {
   }
 
   return filteredCollections
+})
+
+const requestContext = computed(() => {
+  return tabs.currentActiveTab.value.document.request
 })
 
 const displayModalAdd = (shouldDisplay: boolean) => {
@@ -378,6 +391,14 @@ const editCollection = (
   editingCollectionIndex.value = collectionIndex
   displayModalEdit(true)
 }
+
+const duplicateCollection = ({
+  path,
+  collectionSyncID,
+}: {
+  path: string
+  collectionSyncID?: string
+}) => duplicateGraphQLCollection(path, collectionSyncID)
 
 const onAddRequest = ({
   name,
@@ -676,4 +697,11 @@ const resetSelectedData = () => {
   editingRequest.value = null
   editingRequestIndex.value = null
 }
+
+defineActionHandler("collection.new", () => {
+  displayModalAdd(true)
+})
+defineActionHandler("modals.collection.import", () => {
+  displayModalImportExport(true)
+})
 </script>

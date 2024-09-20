@@ -11,6 +11,7 @@ import {
   EditorState,
   Compartment,
   EditorSelection,
+  Prec,
 } from "@codemirror/state"
 import {
   Language,
@@ -241,11 +242,27 @@ export function useCodemirror(
     ? new HoppEnvironmentPlugin(subscribeToStream, view)
     : null
 
+  const closeContextMenu = () => {
+    invokeAction("contextmenu.open", {
+      position: {
+        top: 0,
+        left: 0,
+      },
+      text: null,
+    })
+  }
+
   function handleTextSelection() {
     const selection = view.value?.state.selection.main
     if (selection) {
       const { from, to } = selection
-      if (from === to) return
+
+      // If the selection is empty, hide the context menu
+      if (from === to) {
+        closeContextMenu()
+        return
+      }
+
       const text = view.value?.state.doc.sliceString(from, to)
       const coords = view.value?.coordsAtPos(from)
       const top = coords?.top ?? 0
@@ -259,13 +276,7 @@ export function useCodemirror(
           text,
         })
       } else {
-        invokeAction("contextmenu.open", {
-          position: {
-            top,
-            left,
-          },
-          text: null,
-        })
+        closeContextMenu()
       }
     }
   }
@@ -297,19 +308,12 @@ export function useCodemirror(
               options.onUpdate(update)
             }
 
-            if (update.selectionSet) {
-              const cursorPos = update.state.selection.main.head
-              const line = update.state.doc.lineAt(cursorPos)
+            const cursorPos = update.state.selection.main.head
+            const line = update.state.doc.lineAt(cursorPos)
 
-              cachedCursor.value = {
-                line: line.number - 1,
-                ch: cursorPos - line.from,
-              }
-
-              cursor.value = {
-                line: cachedCursor.value.line,
-                ch: cachedCursor.value.ch,
-              }
+            cachedCursor.value = {
+              line: line.number - 1,
+              ch: cursorPos - line.from,
             }
 
             cursor.value = {
@@ -330,7 +334,10 @@ export function useCodemirror(
       ),
 
       EditorView.domEventHandlers({
-        scroll(event) {
+        scroll(event, view) {
+          // HACK: This is a workaround to fix the issue in CodeMirror where the content doesn't load when the editor is not in view.
+          view.requestMeasure()
+
           if (event.target && options.contextMenuEnabled) {
             // Debounce to make the performance better
             debouncedTextSelection(30)()
@@ -371,6 +378,15 @@ export function useCodemirror(
           run: indentLess,
         },
       ]),
+      Prec.highest(
+        keymap.of([
+          {
+            key: "Cmd-Enter" /* macOS */ || "Ctrl-Enter" /* Windows */,
+            preventDefault: true,
+            run: () => true,
+          },
+        ])
+      ),
       tooltips({
         parent: document.body,
         position: "absolute",

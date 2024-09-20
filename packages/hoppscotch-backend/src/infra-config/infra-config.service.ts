@@ -15,13 +15,21 @@ import {
   INFRA_CONFIG_OPERATION_NOT_ALLOWED,
 } from 'src/errors';
 import {
+  decrypt,
+  encrypt,
   throwErr,
   validateSMTPEmail,
   validateSMTPUrl,
   validateUrl,
 } from 'src/utils';
 import { ConfigService } from '@nestjs/config';
-import { ServiceStatus, getDefaultInfraConfigs, stopApp } from './helper';
+import {
+  ServiceStatus,
+  getDefaultInfraConfigs,
+  getEncryptionRequiredInfraConfigEntries,
+  getMissingInfraConfigEntries,
+  stopApp,
+} from './helper';
 import { EnableAndDisableSSOArgs, InfraConfigArgs } from './input-args';
 import { AuthProvider } from 'src/auth/helper';
 
@@ -38,6 +46,7 @@ export class InfraConfigService implements OnModuleInit {
     InfraConfigEnum.ALLOW_ANALYTICS_COLLECTION,
     InfraConfigEnum.ANALYTICS_USER_ID,
     InfraConfigEnum.IS_FIRST_TIME_INFRA_SETUP,
+    InfraConfigEnum.MAILER_SMTP_ENABLE,
   ];
   // Following fields can not be fetched by `infraConfigs` Query. Use dedicated queries for these fields instead.
   EXCLUDE_FROM_FETCH_CONFIGS = [
@@ -56,17 +65,30 @@ export class InfraConfigService implements OnModuleInit {
    */
   async initializeInfraConfigTable() {
     try {
-      // Fetch the default values (value in .env) for configs to be saved in 'infra_config' table
-      const infraConfigDefaultObjs = await getDefaultInfraConfigs();
-
-      // Eliminate the rows (from 'infraConfigDefaultObjs') that are already present in the database table
-      const dbInfraConfigs = await this.prisma.infraConfig.findMany();
-      const propsToInsert = infraConfigDefaultObjs.filter(
-        (p) => !dbInfraConfigs.find((e) => e.name === p.name),
-      );
+      // Adding missing InfraConfigs to the database (with encrypted values)
+      const propsToInsert = await getMissingInfraConfigEntries();
 
       if (propsToInsert.length > 0) {
         await this.prisma.infraConfig.createMany({ data: propsToInsert });
+      }
+
+      // Encrypting previous InfraConfigs that are required to be encrypted
+      const encryptionRequiredEntries =
+        await getEncryptionRequiredInfraConfigEntries();
+
+      if (encryptionRequiredEntries.length > 0) {
+        const dbOperations = encryptionRequiredEntries.map((dbConfig) => {
+          return this.prisma.infraConfig.update({
+            where: { name: dbConfig.name },
+            data: { value: encrypt(dbConfig.value), isEncrypted: true },
+          });
+        });
+
+        await Promise.allSettled(dbOperations);
+      }
+
+      // Restart the app if needed
+      if (propsToInsert.length > 0 || encryptionRequiredEntries.length > 0) {
         stopApp();
       }
     } catch (error) {
@@ -77,6 +99,7 @@ export class InfraConfigService implements OnModuleInit {
         // Prisma error code for 'Table does not exist'
         throwErr(DATABASE_TABLE_NOT_EXIST);
       } else {
+        console.log(error);
         throwErr(error);
       }
     }
@@ -88,9 +111,13 @@ export class InfraConfigService implements OnModuleInit {
    * @returns InfraConfig model
    */
   cast(dbInfraConfig: DBInfraConfig) {
+    const plainValue = dbInfraConfig.isEncrypted
+      ? decrypt(dbInfraConfig.value)
+      : dbInfraConfig.value;
+
     return <InfraConfig>{
       name: dbInfraConfig.name,
-      value: dbInfraConfig.value ?? '',
+      value: plainValue ?? '',
     };
   }
 
@@ -100,10 +127,16 @@ export class InfraConfigService implements OnModuleInit {
    */
   async getInfraConfigsMap() {
     const infraConfigs = await this.prisma.infraConfig.findMany();
+
     const infraConfigMap: Record<string, string> = {};
     infraConfigs.forEach((config) => {
-      infraConfigMap[config.name] = config.value;
+      if (config.isEncrypted) {
+        infraConfigMap[config.name] = decrypt(config.value);
+      } else {
+        infraConfigMap[config.name] = config.value;
+      }
     });
+
     return infraConfigMap;
   }
 
@@ -119,9 +152,14 @@ export class InfraConfigService implements OnModuleInit {
     if (E.isLeft(isValidate)) return E.left(isValidate.left);
 
     try {
+      const { isEncrypted } = await this.prisma.infraConfig.findUnique({
+        where: { name },
+        select: { isEncrypted: true },
+      });
+
       const infraConfig = await this.prisma.infraConfig.update({
         where: { name },
-        data: { value },
+        data: { value: isEncrypted ? encrypt(value) : value },
       });
 
       if (restartEnabled) stopApp();
@@ -147,11 +185,23 @@ export class InfraConfigService implements OnModuleInit {
     if (E.isLeft(isValidate)) return E.left(isValidate.left);
 
     try {
+      const dbInfraConfig = await this.prisma.infraConfig.findMany({
+        select: { name: true, isEncrypted: true },
+      });
+
       await this.prisma.$transaction(async (tx) => {
         for (let i = 0; i < infraConfigs.length; i++) {
+          const isEncrypted = dbInfraConfig.find(
+            (p) => p.name === infraConfigs[i].name,
+          )?.isEncrypted;
+
           await tx.infraConfig.update({
             where: { name: infraConfigs[i].name },
-            data: { value: infraConfigs[i].value },
+            data: {
+              value: isEncrypted
+                ? encrypt(infraConfigs[i].value)
+                : infraConfigs[i].value,
+            },
           });
         }
       });
@@ -198,7 +248,20 @@ export class InfraConfigService implements OnModuleInit {
           configMap.MICROSOFT_TENANT
         );
       case AuthProvider.EMAIL:
-        return configMap.MAILER_SMTP_URL && configMap.MAILER_ADDRESS_FROM;
+        if (configMap.MAILER_SMTP_ENABLE !== 'true') return false;
+        if (configMap.MAILER_USE_CUSTOM_CONFIGS === 'true') {
+          return (
+            configMap.MAILER_SMTP_HOST &&
+            configMap.MAILER_SMTP_PORT &&
+            configMap.MAILER_SMTP_SECURE &&
+            configMap.MAILER_SMTP_USER &&
+            configMap.MAILER_SMTP_PASSWORD &&
+            configMap.MAILER_TLS_REJECT_UNAUTHORIZED &&
+            configMap.MAILER_ADDRESS_FROM
+          );
+        } else {
+          return configMap.MAILER_SMTP_URL && configMap.MAILER_ADDRESS_FROM;
+        }
       default:
         return false;
     }
@@ -218,6 +281,47 @@ export class InfraConfigService implements OnModuleInit {
 
     if (E.isLeft(isUpdated)) return E.left(isUpdated.left);
     return E.right(isUpdated.right.value === 'true');
+  }
+
+  /**
+   * Enable or Disable SMTP
+   * @param status Status to enable or disable
+   * @returns Either true or an error
+   */
+  async enableAndDisableSMTP(status: ServiceStatus) {
+    const isUpdated = await this.toggleServiceStatus(
+      InfraConfigEnum.MAILER_SMTP_ENABLE,
+      status,
+      true,
+    );
+    if (E.isLeft(isUpdated)) return E.left(isUpdated.left);
+
+    if (status === ServiceStatus.DISABLE) {
+      this.enableAndDisableSSO([{ provider: AuthProvider.EMAIL, status }]);
+    }
+    return E.right(true);
+  }
+
+  /**
+   * Enable or Disable Service (i.e. ALLOW_AUDIT_LOGS, ALLOW_ANALYTICS_COLLECTION, ALLOW_DOMAIN_WHITELISTING, SITE_PROTECTION)
+   * @param configName Name of the InfraConfigEnum
+   * @param status Status to enable or disable
+   * @param restartEnabled If true, restart the app after updating the InfraConfig
+   * @returns Either true or an error
+   */
+  async toggleServiceStatus(
+    configName: InfraConfigEnum,
+    status: ServiceStatus,
+    restartEnabled = false,
+  ) {
+    const isUpdated = await this.update(
+      configName,
+      status === ServiceStatus.ENABLE ? 'true' : 'false',
+      restartEnabled,
+    );
+    if (E.isLeft(isUpdated)) return E.left(isUpdated.left);
+
+    return E.right(true);
   }
 
   /**
@@ -285,6 +389,7 @@ export class InfraConfigService implements OnModuleInit {
   /**
    * Get InfraConfigs by names
    * @param names Names of the InfraConfigs
+   * @param checkDisallowedKeys If true, check if the names are allowed to fetch by client
    * @returns InfraConfig model
    */
   async getMany(names: InfraConfigEnum[], checkDisallowedKeys: boolean = true) {
@@ -315,6 +420,16 @@ export class InfraConfigService implements OnModuleInit {
     return this.configService
       .get<string>('INFRA.VITE_ALLOWED_AUTH_PROVIDERS')
       .split(',');
+  }
+
+  /**
+   * Check if SMTP is enabled or not
+   * @returns boolean
+   */
+  isSMTPEnabled() {
+    return (
+      this.configService.get<string>('INFRA.MAILER_SMTP_ENABLE') === 'true'
+    );
   }
 
   /**
@@ -364,6 +479,20 @@ export class InfraConfigService implements OnModuleInit {
   ) {
     for (let i = 0; i < infraConfigs.length; i++) {
       switch (infraConfigs[i].name) {
+        case InfraConfigEnum.MAILER_SMTP_ENABLE:
+          if (
+            infraConfigs[i].value !== 'true' &&
+            infraConfigs[i].value !== 'false'
+          )
+            return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
+        case InfraConfigEnum.MAILER_USE_CUSTOM_CONFIGS:
+          if (
+            infraConfigs[i].value !== 'true' &&
+            infraConfigs[i].value !== 'false'
+          )
+            return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
         case InfraConfigEnum.MAILER_SMTP_URL:
           const isValidUrl = validateSMTPUrl(infraConfigs[i].value);
           if (!isValidUrl) return E.left(INFRA_CONFIG_INVALID_INPUT);
@@ -371,6 +500,32 @@ export class InfraConfigService implements OnModuleInit {
         case InfraConfigEnum.MAILER_ADDRESS_FROM:
           const isValidEmail = validateSMTPEmail(infraConfigs[i].value);
           if (!isValidEmail) return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
+        case InfraConfigEnum.MAILER_SMTP_HOST:
+          if (!infraConfigs[i].value) return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
+        case InfraConfigEnum.MAILER_SMTP_PORT:
+          if (!infraConfigs[i].value) return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
+        case InfraConfigEnum.MAILER_SMTP_SECURE:
+          if (
+            infraConfigs[i].value !== 'true' &&
+            infraConfigs[i].value !== 'false'
+          )
+            return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
+        case InfraConfigEnum.MAILER_SMTP_USER:
+          if (!infraConfigs[i].value) return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
+        case InfraConfigEnum.MAILER_SMTP_PASSWORD:
+          if (!infraConfigs[i].value) return E.left(INFRA_CONFIG_INVALID_INPUT);
+          break;
+        case InfraConfigEnum.MAILER_TLS_REJECT_UNAUTHORIZED:
+          if (
+            infraConfigs[i].value !== 'true' &&
+            infraConfigs[i].value !== 'false'
+          )
+            return E.left(INFRA_CONFIG_INVALID_INPUT);
           break;
         case InfraConfigEnum.GOOGLE_CLIENT_ID:
           if (!infraConfigs[i].value) return E.left(INFRA_CONFIG_INVALID_INPUT);

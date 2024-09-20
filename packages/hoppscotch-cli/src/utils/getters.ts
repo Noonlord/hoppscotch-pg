@@ -1,18 +1,36 @@
 import {
+  EnvironmentVariable,
   HoppRESTHeader,
-  Environment,
-  parseTemplateStringE,
   HoppRESTParam,
+  HoppRESTRequestVariables,
+  parseTemplateStringE,
 } from "@hoppscotch/data";
+import axios, { AxiosError } from "axios";
 import chalk from "chalk";
-import { pipe } from "fp-ts/function";
 import * as A from "fp-ts/Array";
 import * as E from "fp-ts/Either";
-import * as S from "fp-ts/string";
 import * as O from "fp-ts/Option";
-import { error } from "../types/errors";
+import { pipe } from "fp-ts/function";
+import * as S from "fp-ts/string";
+import fs from "fs/promises";
 import { round } from "lodash-es";
+
+import { error } from "../types/errors";
 import { DEFAULT_DURATION_PRECISION } from "./constants";
+import { readJsonFile } from "./mutators";
+import {
+  WorkspaceCollection,
+  WorkspaceEnvironment,
+  transformWorkspaceCollections,
+  transformWorkspaceEnvironment,
+} from "./workspace-access";
+
+type GetResourceContentsParams = {
+  pathOrId: string;
+  accessToken?: string;
+  serverUrl?: string;
+  resourceType: "collection" | "environment";
+};
 
 /**
  * Generates template string (status + statusText) with specific color unicodes
@@ -40,12 +58,12 @@ export const getColorStatusCode = (
  * Replaces all template-string with their effective ENV values to generate effective
  * request headers/parameters meta-data.
  * @param metaData Headers/parameters on which ENVs will be applied.
- * @param environment Provides ENV variables for parsing template-string.
+ * @param resolvedVariables Provides ENV variables for parsing template-string.
  * @returns Active, non-empty-key, parsed headers/parameters pairs.
  */
 export const getEffectiveFinalMetaData = (
   metaData: HoppRESTHeader[] | HoppRESTParam[],
-  environment: Environment
+  resolvedVariables: EnvironmentVariable[]
 ) =>
   pipe(
     metaData,
@@ -54,11 +72,14 @@ export const getEffectiveFinalMetaData = (
      * Selecting only non-empty and active pairs.
      */
     A.filter(({ key, active }) => !S.isEmpty(key) && active),
-    A.map(({ key, value }) => ({
-      active: true,
-      key: parseTemplateStringE(key, environment.variables),
-      value: parseTemplateStringE(value, environment.variables),
-    })),
+    A.map(({ key, value, description }) => {
+      return {
+        active: true,
+        key: parseTemplateStringE(key, resolvedVariables),
+        value: parseTemplateStringE(value, resolvedVariables),
+        description,
+      };
+    }),
     E.fromPredicate(
       /**
        * Check if every key-value is right either. Else return HoppCLIError with
@@ -71,9 +92,14 @@ export const getEffectiveFinalMetaData = (
       /**
        * Filtering and mapping only right-eithers for each key-value as [string, string].
        */
-      A.filterMap(({ key, value }) =>
+      A.filterMap(({ key, value, description }) =>
         E.isRight(key) && E.isRight(value)
-          ? O.some({ active: true, key: key.right, value: value.right })
+          ? O.some({
+              active: true,
+              key: key.right,
+              value: value.right,
+              description,
+            })
           : O.none
       )
     )
@@ -134,3 +160,131 @@ export const roundDuration = (
   duration: number,
   precision: number = DEFAULT_DURATION_PRECISION
 ) => round(duration, precision);
+
+/**
+ * Retrieves the contents of a resource (collection or environment) from a local file (export) or a remote server (workspaces).
+ *
+ * @param {GetResourceContentsParams} params - The parameters for retrieving resource contents.
+ * @param {string} params.pathOrId - The path to the local file or the ID for remote retrieval.
+ * @param {string} [params.accessToken] - The access token for authorizing remote retrieval.
+ * @param {string} [params.serverUrl] - The SH instance server URL for remote retrieval. Defaults to the cloud instance.
+ * @param {"collection" | "environment"} params.resourceType - The type of the resource to retrieve.
+ * @returns {Promise<unknown>} A promise that resolves to the contents of the resource.
+ * @throws Will throw an error if the content type of the fetched resource is not `application/json`,
+ *         if there is an issue with the access token, if the server connection is refused,
+ *         or if the server URL is invalid.
+ */
+export const getResourceContents = async (
+  params: GetResourceContentsParams
+): Promise<unknown> => {
+  const { pathOrId, accessToken, serverUrl, resourceType } = params;
+
+  let contents: unknown | null = null;
+  let fileExistsInPath = false;
+
+  try {
+    await fs.access(pathOrId);
+    fileExistsInPath = true;
+  } catch (e) {
+    fileExistsInPath = false;
+  }
+
+  if (accessToken && !fileExistsInPath) {
+    const resolvedServerUrl = serverUrl || "https://api.hoppscotch.io";
+
+    try {
+      const separator = resolvedServerUrl.endsWith("/") ? "" : "/";
+      const resourcePath =
+        resourceType === "collection" ? "collection" : "environment";
+
+      const url = `${resolvedServerUrl}${separator}v1/access-tokens/${resourcePath}/${pathOrId}`;
+
+      const { data, headers } = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!headers["content-type"].includes("application/json")) {
+        throw new AxiosError("INVALID_CONTENT_TYPE");
+      }
+
+      contents =
+        resourceType === "collection"
+          ? transformWorkspaceCollections([data] as WorkspaceCollection[])[0]
+          : transformWorkspaceEnvironment(data as WorkspaceEnvironment);
+    } catch (err) {
+      if (err instanceof AxiosError) {
+        const axiosErr: AxiosError<{
+          reason?: "TOKEN_EXPIRED" | "TOKEN_INVALID" | "INVALID_ID";
+          message: string;
+          statusCode: number;
+        }> = err;
+
+        const errReason = axiosErr.response?.data?.reason;
+
+        if (errReason) {
+          throw error({
+            code: errReason,
+            data: ["TOKEN_EXPIRED", "TOKEN_INVALID"].includes(errReason)
+              ? accessToken
+              : pathOrId,
+          });
+        }
+
+        if (axiosErr.code === "ECONNREFUSED") {
+          throw error({
+            code: "SERVER_CONNECTION_REFUSED",
+            data: resolvedServerUrl,
+          });
+        }
+
+        if (
+          axiosErr.message === "INVALID_CONTENT_TYPE" ||
+          axiosErr.code === "ERR_INVALID_URL" ||
+          axiosErr.code === "ENOTFOUND" ||
+          axiosErr.code === "ERR_BAD_REQUEST" ||
+          axiosErr.response?.status === 404
+        ) {
+          throw error({ code: "INVALID_SERVER_URL", data: resolvedServerUrl });
+        }
+      } else {
+        throw error({ code: "UNKNOWN_ERROR", data: err });
+      }
+    }
+  }
+
+  // Fallback to reading from file if contents are not available
+  if (contents === null) {
+    contents = await readJsonFile(pathOrId, fileExistsInPath);
+  }
+
+  return contents;
+};
+
+/**
+ * Processes incoming request variables and environment variables and returns a list
+ * where active request variables are picked and prioritised over the supplied environment variables.
+ * Falls back to environment variables for an empty request variable.
+ *
+ * @param {HoppRESTRequestVariables} requestVariables - Incoming request variables.
+ * @param {EnvironmentVariable[]} environmentVariables - Incoming environment variables.
+ * @returns {EnvironmentVariable[]} The resolved list of variables that conforms to the shape of environment variables.
+ */
+export const getResolvedVariables = (
+  requestVariables: HoppRESTRequestVariables,
+  environmentVariables: EnvironmentVariable[]
+): EnvironmentVariable[] => {
+  const activeRequestVariables = requestVariables
+    .filter(({ active, value }) => active && value)
+    .map(({ key, value }) => ({ key, value, secret: false }));
+
+  const requestVariableKeys = activeRequestVariables.map(({ key }) => key);
+
+  // Request variables have higher priority, hence filtering out environment variables with the same keys
+  const filteredEnvironmentVariables = environmentVariables.filter(
+    ({ key }) => !requestVariableKeys.includes(key)
+  );
+
+  return [...activeRequestVariables, ...filteredEnvironmentVariables];
+};

@@ -5,10 +5,10 @@ import {
   HoppRESTParam,
   HoppRESTReqBody,
   HoppRESTRequest,
+  HoppRESTRequestVariable,
   knownContentTypes,
   makeCollection,
   makeRESTRequest,
-  HoppRESTRequestVariable,
 } from "@hoppscotch/data"
 
 import * as A from "fp-ts/Array"
@@ -16,6 +16,7 @@ import * as TE from "fp-ts/TaskEither"
 import * as TO from "fp-ts/TaskOption"
 import { pipe } from "fp-ts/function"
 import { ImportRequest, convert } from "insomnia-importers"
+import { Header, Parameter } from "insomnia-importers/dist/src/entities"
 
 import { IMPORTER_INVALID_FILE_FORMAT } from "."
 import { replaceInsomniaTemplating } from "./insomniaEnv"
@@ -36,10 +37,13 @@ type InsomniaPathParameter = {
 }
 
 type InsomniaFolderResource = ImportRequest & { _type: "request_group" }
-type InsomniaRequestResource = ImportRequest & {
+type InsomniaRequestResource = Omit<ImportRequest, "headers" | "parameters"> & {
   _type: "request"
 } & {
   pathParameters?: InsomniaPathParameter[]
+} & {
+  headers: (Header & { description: string })[]
+  parameters: (Parameter & { description: string })[]
 }
 
 const parseInsomniaDoc = (content: string) =>
@@ -48,8 +52,13 @@ const parseInsomniaDoc = (content: string) =>
 const replacePathVarTemplating = (expression: string) =>
   expression.replaceAll(/:([^/]+)/g, "<<$1>>")
 
-const replaceVarTemplating = (expression: string) =>
-  pipe(expression, replacePathVarTemplating, replaceInsomniaTemplating)
+const replaceVarTemplating = (expression: string, pathVar = false) => {
+  return pipe(
+    expression,
+    pathVar ? replacePathVarTemplating : (x) => x,
+    replaceInsomniaTemplating
+  )
+}
 
 const getFoldersIn = (
   folder: InsomniaFolderResource | null,
@@ -121,6 +130,7 @@ const getHoppReqAuth = (req: InsomniaRequestResource): HoppRESTAuth => {
         isPKCE: false,
         tokenEndpoint: replaceVarTemplating(auth.accessTokenUrl ?? ""),
       },
+      addTo: "HEADERS",
     }
   else if (auth.type === "bearer")
     return {
@@ -186,6 +196,7 @@ const getHoppReqHeaders = (req: InsomniaRequestResource): HoppRESTHeader[] =>
     key: replaceVarTemplating(header.name),
     value: replaceVarTemplating(header.value),
     active: !header.disabled,
+    description: header.description ?? "",
   })) ?? []
 
 const getHoppReqParams = (req: InsomniaRequestResource): HoppRESTParam[] =>
@@ -193,6 +204,7 @@ const getHoppReqParams = (req: InsomniaRequestResource): HoppRESTParam[] =>
     key: replaceVarTemplating(param.name),
     value: replaceVarTemplating(param.value ?? ""),
     active: !(param.disabled ?? false),
+    description: param.description ?? "",
   })) ?? []
 
 const getHoppReqVariables = (
@@ -208,7 +220,7 @@ const getHoppRequest = (req: InsomniaRequestResource): HoppRESTRequest =>
   makeRESTRequest({
     name: req.name ?? "Untitled Request",
     method: req.method?.toUpperCase() ?? "GET",
-    endpoint: replaceVarTemplating(req.url ?? ""),
+    endpoint: replaceVarTemplating(req.url ?? "", true),
     auth: getHoppReqAuth(req),
     body: getHoppReqBody(req),
     headers: getHoppReqHeaders(req),

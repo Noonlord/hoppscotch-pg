@@ -54,9 +54,7 @@
               :key="tab.id"
               :label="tab.label"
             >
-              <div
-                class="divide-y divide-dividerLight rounded border border-divider"
-              >
+              <div class="divide-y divide-dividerLight">
                 <HoppSmartPlaceholder
                   v-if="tab.variables.length === 0"
                   :src="`/images/states/${colorMode.value}/blockchain.svg`"
@@ -385,6 +383,11 @@ const removeEnvironmentVariable = (id: number) => {
 const saveEnvironment = () => {
   if (!editingName.value) {
     toast.error(`${t("environment.invalid_name")}`)
+    return
+  }
+
+  if (editingName.value.length < 3) {
+    toast.error(`${t("environment.short_name")}`)
     return
   }
 

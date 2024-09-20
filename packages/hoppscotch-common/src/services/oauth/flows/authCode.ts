@@ -30,7 +30,6 @@ const AuthCodeOauthFlowParamsSchema = AuthCodeGrantTypeParams.pick({
         params.authEndpoint.length >= 1 &&
         params.tokenEndpoint.length >= 1 &&
         params.clientID.length >= 1 &&
-        params.clientSecret.length >= 1 &&
         (!params.scopes || params.scopes.trim().length >= 1)
       )
     },
@@ -46,6 +45,13 @@ const AuthCodeOauthFlowParamsSchema = AuthCodeGrantTypeParams.pick({
 export type AuthCodeOauthFlowParams = z.infer<
   typeof AuthCodeOauthFlowParamsSchema
 >
+
+export type AuthCodeOauthRefreshParams = {
+  tokenEndpoint: string
+  clientID: string
+  clientSecret?: string
+  refreshToken: string
+}
 
 export const getDefaultAuthCodeOauthFlowParams =
   (): AuthCodeOauthFlowParams => ({
@@ -85,7 +91,7 @@ const initAuthCodeOauthFlow = async ({
     grant_type: "AUTHORIZATION_CODE"
     authEndpoint: string
     tokenEndpoint: string
-    clientSecret: string
+    clientSecret?: string
     clientID: string
     isPKCE: boolean
     codeVerifier?: string
@@ -234,6 +240,7 @@ const handleRedirectForAuthCodeOauthFlow = async (localConfig: string) => {
 
   const withAccessTokenSchema = z.object({
     access_token: z.string(),
+    refresh_token: z.string().optional(),
   })
 
   const parsedTokenResponse = withAccessTokenSchema.safeParse(
@@ -285,9 +292,60 @@ const encodeArrayBufferAsUrlEncodedBase64 = (buffer: ArrayBuffer) => {
   return hashBase64URL
 }
 
+const refreshToken = async ({
+  tokenEndpoint,
+  clientID,
+  refreshToken,
+  clientSecret,
+}: AuthCodeOauthRefreshParams) => {
+  const formData = new URLSearchParams()
+  formData.append("grant_type", "refresh_token")
+  formData.append("refresh_token", refreshToken)
+  formData.append("client_id", clientID)
+  if (clientSecret) {
+    formData.append("client_secret", clientSecret)
+  }
+
+  const { response } = interceptorService.runRequest({
+    url: tokenEndpoint,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    data: formData.toString(),
+  })
+
+  const res = await response
+
+  if (E.isLeft(res)) {
+    return E.left("AUTH_TOKEN_REQUEST_FAILED" as const)
+  }
+
+  const responsePayload = decodeResponseAsJSON(res.right)
+
+  if (E.isLeft(responsePayload)) {
+    return E.left("AUTH_TOKEN_REQUEST_FAILED" as const)
+  }
+
+  const withAccessTokenAndRefreshTokenSchema = z.object({
+    access_token: z.string(),
+    refresh_token: z.string().optional(),
+  })
+
+  const parsedTokenResponse = withAccessTokenAndRefreshTokenSchema.safeParse(
+    responsePayload.right
+  )
+
+  return parsedTokenResponse.success
+    ? E.right(parsedTokenResponse.data)
+    : E.left("AUTH_TOKEN_REQUEST_INVALID_RESPONSE" as const)
+}
+
 export default createFlowConfig(
   "AUTHORIZATION_CODE" as const,
   AuthCodeOauthFlowParamsSchema,
   initAuthCodeOauthFlow,
-  handleRedirectForAuthCodeOauthFlow
+  handleRedirectForAuthCodeOauthFlow,
+  refreshToken
 )

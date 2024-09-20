@@ -8,14 +8,29 @@
   >
     <template #body>
       <div class="flex flex-col">
-        <HoppSmartInput
-          v-model="requestName"
-          styles="relative flex"
-          placeholder=" "
-          :label="t('request.name')"
-          input-styles="floating-input"
-          @submit="saveRequestAs"
-        />
+        <div class="flex gap-1">
+          <HoppSmartInput
+            v-model="requestName"
+            class="flex-grow"
+            styles="relative flex"
+            placeholder=" "
+            :label="t('request.name')"
+            input-styles="floating-input"
+            @submit="saveRequestAs"
+          />
+          <HoppButtonSecondary
+            v-if="canDoRequestNameGeneration"
+            v-tippy="{ theme: 'tooltip' }"
+            :icon="IconSparkle"
+            :disabled="isGenerateRequestNamePending"
+            class="rounded-md"
+            :class="{
+              'animate-pulse': isGenerateRequestNamePending,
+            }"
+            :title="t('ai_experiments.generate_request_name')"
+            @click="generateRequestName(requestContext)"
+          />
+        </div>
 
         <label class="p-4">
           {{ t("collection.select_location") }}
@@ -56,23 +71,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue"
-import { cloneDeep } from "lodash-es"
+import { useI18n } from "@composables/i18n"
+import { useToast } from "@composables/toast"
 import {
   HoppGQLRequest,
   HoppRESTRequest,
   isHoppRESTRequest,
 } from "@hoppscotch/data"
-import { pipe } from "fp-ts/function"
+import { computedWithControl } from "@vueuse/core"
+import { useService } from "dioc/vue"
 import * as TE from "fp-ts/TaskEither"
-import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
+import { pipe } from "fp-ts/function"
+import { cloneDeep } from "lodash-es"
+import { computed, nextTick, reactive, ref, watch } from "vue"
+import { useRequestNameGeneration } from "~/composables/ai-experiments"
+import { GQLError } from "~/helpers/backend/GQLClient"
 import {
   createRequestInCollection,
   updateTeamRequest,
 } from "~/helpers/backend/mutations/TeamRequest"
 import { Picked } from "~/helpers/types/HoppPicked"
-import { useI18n } from "@composables/i18n"
-import { useToast } from "@composables/toast"
 import {
   cascadeParentCollectionForHeaderAuth,
   editGraphqlRequest,
@@ -80,12 +98,11 @@ import {
   saveGraphqlRequestAs,
   saveRESTRequestAs,
 } from "~/newstore/collections"
-import { GQLError } from "~/helpers/backend/GQLClient"
-import { computedWithControl } from "@vueuse/core"
 import { platform } from "~/platform"
-import { useService } from "dioc/vue"
-import { RESTTabService } from "~/services/tab/rest"
 import { GQLTabService } from "~/services/tab/graphql"
+import { RESTTabService } from "~/services/tab/rest"
+import { TeamWorkspace } from "~/services/workspace.service"
+import IconSparkle from "~icons/lucide/sparkles"
 
 const t = useI18n()
 const toast = useToast()
@@ -93,12 +110,10 @@ const toast = useToast()
 const RESTTabs = useService(RESTTabService)
 const GQLTabs = useService(GQLTabService)
 
-type SelectedTeam = GetMyTeamsQuery["myTeams"][number] | undefined
-
 type CollectionType =
   | {
       type: "team-collections"
-      selectedTeam: SelectedTeam
+      selectedTeam: TeamWorkspace
     }
   | { type: "my-collections"; selectedTeam: undefined }
 
@@ -146,7 +161,25 @@ const reqName = computed(() => {
   return gqlRequestName.value
 })
 
+const requestContext = computed(() => {
+  if (props.request) {
+    return props.request
+  }
+
+  if (props.mode === "rest") {
+    return RESTTabs.currentActiveTab.value.document.request
+  }
+
+  return GQLTabs.currentActiveTab.value.document.request
+})
+
 const requestName = ref(reqName.value)
+
+const {
+  canDoRequestNameGeneration,
+  generateRequestName,
+  isGenerateRequestNamePending,
+} = useRequestNameGeneration(requestName)
 
 watch(
   () => [RESTTabs.currentActiveTab.value, GQLTabs.currentActiveTab.value],
@@ -192,7 +225,7 @@ watch(
   }
 )
 
-const updateTeam = (newTeam: SelectedTeam) => {
+const updateTeam = (newTeam: TeamWorkspace) => {
   collectionsType.value.selectedTeam = newTeam
 }
 
@@ -493,7 +526,7 @@ const updateTeamCollectionOrFolder = (
   const data = {
     title: requestUpdated.name,
     request: JSON.stringify(requestUpdated),
-    teamID: collectionsType.value.selectedTeam.id,
+    teamID: collectionsType.value.selectedTeam.teamID,
   }
   pipe(
     createRequestInCollection(collectionID, data),

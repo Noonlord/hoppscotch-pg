@@ -53,7 +53,7 @@
         >
           <HoppButtonSecondary
             v-tippy="{ theme: 'tooltip' }"
-            :title="t('app.copy_interface_type')"
+            :title="t('action.more')"
             :icon="IconMore"
           />
           <template #content="{ hide }">
@@ -64,15 +64,14 @@
               @keyup.escape="hide()"
             >
               <HoppSmartItem
-                v-for="(language, index) in interfaceLanguages"
-                :key="index"
-                :label="language"
-                :icon="
-                  copiedInterfaceLanguage === language
-                    ? copyInterfaceIcon
-                    : IconCopy
+                :label="t('response.generate_data_schema')"
+                :icon="IconNetwork"
+                @click="
+                  () => {
+                    invokeAction('response.schema.toggle')
+                    hide()
+                  }
                 "
-                @click="runCopyInterface(language)"
               />
             </div>
           </template>
@@ -119,11 +118,8 @@
         />
       </div>
     </div>
-    <div class="h-full">
-      <div
-        ref="jsonResponse"
-        :class="toggleFilter ? 'responseToggleOn' : 'responseToggleOff'"
-      ></div>
+    <div class="h-full relative overflow-auto flex flex-col flex-1">
+      <div ref="jsonResponse" class="absolute inset-0 h-full"></div>
     </div>
     <div
       v-if="outlinePath"
@@ -237,7 +233,7 @@ import IconWrapText from "~icons/lucide/wrap-text"
 import IconFilter from "~icons/lucide/filter"
 import IconMore from "~icons/lucide/more-horizontal"
 import IconHelpCircle from "~icons/lucide/help-circle"
-import IconCopy from "~icons/lucide/copy"
+import IconNetwork from "~icons/lucide/network"
 import * as LJSON from "lossless-json"
 import * as O from "fp-ts/Option"
 import * as E from "fp-ts/Either"
@@ -257,13 +253,11 @@ import {
   useCopyResponse,
   useResponseBody,
   useDownloadResponse,
-  useCopyInterface,
 } from "@composables/lens-actions"
-import { defineActionHandler } from "~/helpers/actions"
+import { defineActionHandler, invokeAction } from "~/helpers/actions"
 import { getPlatformSpecialKey as getSpecialKey } from "~/helpers/platformutils"
 import { useNestedSetting } from "~/composables/settings"
 import { toggleNestedSetting } from "~/newstore/settings"
-import interfaceLanguages from "~/helpers/utils/interfaceLanguages"
 
 const t = useI18n()
 
@@ -275,13 +269,6 @@ const { responseBodyText } = useResponseBody(props.response)
 
 const toggleFilter = ref(false)
 const filterQueryText = ref("")
-const copiedInterfaceLanguage = ref("")
-
-const runCopyInterface = (language: string) => {
-  copyInterface(language).then(() => {
-    copiedInterfaceLanguage.value = language
-  })
-}
 
 type BodyParseError =
   | { type: "JSON_PARSE_FAILED" }
@@ -306,8 +293,8 @@ const jsonResponseBodyText = computed(() => {
           () =>
             JSONPath({
               path: filterQueryText.value,
-              json: parsedJSON,
-            }) as undefined,
+              json: parsedJSON as any,
+            }),
           (err): BodyParseError => ({
             type: "JSON_PATH_QUERY_FAILED",
             error: err as Error,
@@ -365,7 +352,6 @@ const filterResponseError = computed(() =>
 )
 
 const { copyIcon, copyResponse } = useCopyResponse(jsonBodyText)
-const { copyInterfaceIcon, copyInterface } = useCopyInterface(jsonBodyText)
 const { downloadIcon, downloadResponse } = useDownloadResponse(
   "application/json",
   jsonBodyText
@@ -432,13 +418,5 @@ defineActionHandler("response.copy", () => copyResponse())
   @apply py-1;
   @apply transition;
   @apply hover:text-secondary;
-}
-
-:deep(.responseToggleOff .cm-panels) {
-  @apply top-lowerTertiaryStickyFold #{!important};
-}
-
-:deep(.responseToggleOn .cm-panels) {
-  @apply top-lowerFourthStickyFold #{!important};
 }
 </style>

@@ -41,9 +41,7 @@ export class ParameterMenuService extends Service implements ContextMenu {
 
   private readonly contextMenu = this.bind(ContextMenuService)
 
-  constructor() {
-    super()
-
+  override onServiceInit() {
     this.contextMenu.registerMenu(this)
   }
 
@@ -63,7 +61,7 @@ export class ParameterMenuService extends Service implements ContextMenu {
       text = url.search.slice(1)
     }
 
-    const regex = /(\w+)=(\w+)/g
+    const regex = /([^&=]+)=([^&]+)/g
     const matches = text.matchAll(regex)
     const params: Param = {}
 
@@ -94,7 +92,7 @@ export class ParameterMenuService extends Service implements ContextMenu {
     // add the parameters to the current request parameters
     tabService.currentActiveTab.value.document.request.params = [
       ...tabService.currentActiveTab.value.document.request.params,
-      ...queryParams,
+      ...queryParams.map((param) => ({ ...param, description: "" })),
     ]
 
     if (newURL) {

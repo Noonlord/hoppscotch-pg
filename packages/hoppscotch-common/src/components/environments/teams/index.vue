@@ -4,7 +4,7 @@
       class="sticky top-upperPrimaryStickyFold z-10 flex flex-1 flex-shrink-0 justify-between overflow-x-auto border-b border-dividerLight bg-primary"
     >
       <HoppButtonSecondary
-        v-if="team === undefined || team.myRole === 'VIEWER'"
+        v-if="team === undefined || team.role === 'VIEWER'"
         v-tippy="{ theme: 'tooltip' }"
         disabled
         class="!rounded-none"
@@ -28,7 +28,7 @@
           :icon="IconHelpCircle"
         />
         <HoppButtonSecondary
-          v-if="team !== undefined && team.myRole === 'VIEWER'"
+          v-if="team !== undefined && team.role === 'VIEWER'"
           v-tippy="{ theme: 'tooltip' }"
           disabled
           :icon="IconImport"
@@ -44,7 +44,11 @@
       </div>
     </div>
     <HoppSmartPlaceholder
-      v-if="!loading && !teamEnvironments.length && !adapterError"
+      v-if="
+        !loading &&
+        !alphabeticallySortedTeamEnvironments.length &&
+        !adapterError
+      "
       :src="`/images/states/${colorMode.value}/blockchain.svg`"
       :alt="`${t('empty.environments')}`"
       :text="t('empty.environments')"
@@ -79,13 +83,16 @@
     </HoppSmartPlaceholder>
     <div v-else-if="!loading">
       <EnvironmentsTeamsEnvironment
-        v-for="(environment, index) in JSON.parse(
-          JSON.stringify(teamEnvironments)
+        v-for="{ env, index } in JSON.parse(
+          JSON.stringify(alphabeticallySortedTeamEnvironments)
         )"
         :key="`environment-${index}`"
-        :environment="environment"
-        :is-viewer="team?.myRole === 'VIEWER'"
-        @edit-environment="editEnvironment(environment)"
+        :environment="env"
+        :is-viewer="team?.role === 'VIEWER'"
+        @edit-environment="editEnvironment(env)"
+        @show-environment-properties="
+          showEnvironmentProperties(env.environment.id)
+        "
       />
     </div>
     <div v-if="loading" class="flex flex-col items-center justify-center p-4">
@@ -103,18 +110,26 @@
       :show="showModalDetails"
       :action="action"
       :editing-environment="editingEnvironment"
-      :editing-team-id="team?.id"
+      :editing-team-id="team?.teamID"
       :editing-variable-name="editingVariableName"
       :is-secret-option-selected="secretOptionSelected"
-      :is-viewer="team?.myRole === 'VIEWER'"
+      :is-viewer="team?.role === 'VIEWER'"
       @hide-modal="displayModalEdit(false)"
     />
     <EnvironmentsImportExport
       v-if="showModalImportExport"
-      :team-environments="teamEnvironments"
-      :team-id="team?.id"
+      :team-environments="
+        alphabeticallySortedTeamEnvironments.map(({ env }) => env)
+      "
+      :team-id="team?.teamID"
       environment-type="TEAM_ENV"
       @hide-modal="displayModalImportExport(false)"
+    />
+    <EnvironmentsProperties
+      v-if="showEnvironmentsPropertiesModal"
+      v-model="environmentsPropertiesModalActiveTab"
+      :environment-i-d="selectedEnvironmentID!"
+      @hide-modal="showEnvironmentsPropertiesModal = false"
     />
   </div>
 </template>
@@ -129,20 +144,25 @@ import IconPlus from "~icons/lucide/plus"
 import IconHelpCircle from "~icons/lucide/help-circle"
 import IconImport from "~icons/lucide/folder-down"
 import { defineActionHandler } from "~/helpers/actions"
-import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
+import { TeamWorkspace } from "~/services/workspace.service"
+import { sortTeamEnvironmentsAlphabetically } from "~/helpers/utils/sortEnvironmentsAlphabetically"
 
 const t = useI18n()
 
 const colorMode = useColorMode()
 
-type SelectedTeam = GetMyTeamsQuery["myTeams"][number] | undefined
-
 const props = defineProps<{
-  team: SelectedTeam
+  team: TeamWorkspace | undefined
   teamEnvironments: TeamEnvironment[]
   adapterError: GQLError<string> | null
   loading: boolean
 }>()
+
+// Sort environments alphabetically by default
+
+const alphabeticallySortedTeamEnvironments = computed(() =>
+  sortTeamEnvironmentsAlphabetically(props.teamEnvironments, "asc")
+)
 
 const showModalImportExport = ref(false)
 const showModalDetails = ref(false)
@@ -151,7 +171,11 @@ const editingEnvironment = ref<TeamEnvironment | null>(null)
 const editingVariableName = ref("")
 const secretOptionSelected = ref(false)
 
-const isTeamViewer = computed(() => props.team?.myRole === "VIEWER")
+const showEnvironmentsPropertiesModal = ref(false)
+const environmentsPropertiesModalActiveTab = ref("details")
+const selectedEnvironmentID = ref<string | null>(null)
+
+const isTeamViewer = computed(() => props.team?.role === "VIEWER")
 
 const displayModalAdd = (shouldDisplay: boolean) => {
   action.value = "new"
@@ -189,15 +213,21 @@ const getErrorMessage = (err: GQLError<string>) => {
   }
 }
 
+const showEnvironmentProperties = (environmentID: string) => {
+  showEnvironmentsPropertiesModal.value = true
+  selectedEnvironmentID.value = environmentID
+}
+
 defineActionHandler(
   "modals.team.environment.edit",
   ({ envName, variableName, isSecret }) => {
     if (variableName) editingVariableName.value = variableName
-    const teamEnvToEdit = props.teamEnvironments.find(
-      (environment) => environment.environment.name === envName
+    const teamEnvToEdit = alphabeticallySortedTeamEnvironments.value.find(
+      ({ env }) => env.environment.name === envName
     )
     if (teamEnvToEdit) {
-      editEnvironment(teamEnvToEdit)
+      const { env } = teamEnvToEdit
+      editEnvironment(env)
       secretOptionSelected.value = isSecret ?? false
     }
   }

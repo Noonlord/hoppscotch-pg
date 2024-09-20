@@ -18,23 +18,38 @@ import {
   TEAM_COL_SEARCH_FAILED,
   TEAM_REQ_PARENT_TREE_GEN_FAILED,
   TEAM_COLL_PARENT_TREE_GEN_FAILED,
+  TEAM_MEMBER_NOT_FOUND,
 } from '../errors';
 import { PubSubService } from '../pubsub/pubsub.service';
-import { escapeSqlLikeString, isValidLength } from 'src/utils';
+import {
+  escapeSqlLikeString,
+  isValidLength,
+  transformCollectionData,
+} from 'src/utils';
 import * as E from 'fp-ts/Either';
 import * as O from 'fp-ts/Option';
-import { Prisma, TeamCollection as DBTeamCollection } from '@prisma/client';
+import {
+  Prisma,
+  TeamCollection as DBTeamCollection,
+  TeamRequest,
+} from '@prisma/client';
 import { CollectionFolder } from 'src/types/CollectionFolder';
 import { stringToJson } from 'src/utils';
 import { CollectionSearchNode } from 'src/types/CollectionSearchNode';
-import { ParentTreeQueryReturnType, SearchQueryReturnType } from './helper';
+import {
+  GetCollectionResponse,
+  ParentTreeQueryReturnType,
+  SearchQueryReturnType,
+} from './helper';
 import { RESTError } from 'src/types/RESTError';
+import { TeamService } from 'src/team/team.service';
 
 @Injectable()
 export class TeamCollectionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pubsub: PubSubService,
+    private readonly teamService: TeamService,
   ) {}
 
   TITLE_LENGTH = 3;
@@ -123,11 +138,13 @@ export class TeamCollectionService {
       },
     });
 
+    const data = transformCollectionData(collection.right.data);
+
     const result: CollectionFolder = {
       name: collection.right.title,
       folders: childrenCollectionObjects,
       requests: requests.map((x) => x.request),
-      data: JSON.stringify(collection.right.data),
+      data,
     };
 
     return E.right(result);
@@ -298,11 +315,13 @@ export class TeamCollectionService {
    * @returns TeamCollection model
    */
   private cast(teamCollection: DBTeamCollection): TeamCollection {
+    const data = transformCollectionData(teamCollection.data);
+
     return <TeamCollection>{
       id: teamCollection.id,
       title: teamCollection.title,
       parentID: teamCollection.parentID,
-      data: !teamCollection.data ? null : JSON.stringify(teamCollection.data),
+      data,
     };
   }
 
@@ -1343,5 +1362,127 @@ export class TeamCollectionService {
     } catch (error) {
       return E.left(TEAM_REQ_PARENT_TREE_GEN_FAILED);
     }
+  }
+
+  /**
+   * Get all requests in a collection
+   *
+   * @param collectionID The Collection ID
+   * @returns A list of all requests in the collection
+   */
+  private async getAllRequestsInCollection(collectionID: string) {
+    const dbTeamRequests = await this.prisma.teamRequest.findMany({
+      where: {
+        collectionID: collectionID,
+      },
+      orderBy: {
+        orderIndex: 'asc',
+      },
+    });
+
+    const teamRequests = dbTeamRequests.map((tr) => {
+      return <TeamRequest>{
+        id: tr.id,
+        collectionID: tr.collectionID,
+        teamID: tr.teamID,
+        title: tr.title,
+        request: JSON.stringify(tr.request),
+      };
+    });
+
+    return teamRequests;
+  }
+
+  /**
+   * Get Collection Tree for CLI
+   *
+   * @param parentID The parent Collection ID
+   * @returns Collection tree for CLI
+   */
+  private async getCollectionTreeForCLI(parentID: string | null) {
+    const childCollections = await this.prisma.teamCollection.findMany({
+      where: { parentID },
+      orderBy: { orderIndex: 'asc' },
+    });
+
+    const response: GetCollectionResponse[] = [];
+
+    for (const collection of childCollections) {
+      const folder: GetCollectionResponse = {
+        id: collection.id,
+        data: collection.data === null ? null : JSON.stringify(collection.data),
+        title: collection.title,
+        parentID: collection.parentID,
+        folders: await this.getCollectionTreeForCLI(collection.id),
+        requests: await this.getAllRequestsInCollection(collection.id),
+      };
+
+      response.push(folder);
+    }
+
+    return response;
+  }
+
+  /**
+   * Get Collection for CLI
+   *
+   * @param collectionID The Collection ID
+   * @param userUid The User UID
+   * @returns An Either of the Collection details
+   */
+  async getCollectionForCLI(collectionID: string, userUid: string) {
+    try {
+      const collection = await this.prisma.teamCollection.findUniqueOrThrow({
+        where: { id: collectionID },
+      });
+
+      const teamMember = await this.teamService.getTeamMember(
+        collection.teamID,
+        userUid,
+      );
+      if (!teamMember) return E.left(TEAM_MEMBER_NOT_FOUND);
+
+      return E.right(<GetCollectionResponse>{
+        id: collection.id,
+        data: collection.data === null ? null : JSON.stringify(collection.data),
+        title: collection.title,
+        parentID: collection.parentID,
+        folders: await this.getCollectionTreeForCLI(collection.id),
+        requests: await this.getAllRequestsInCollection(collection.id),
+      });
+    } catch (error) {
+      return E.left(TEAM_COLL_NOT_FOUND);
+    }
+  }
+
+  /**
+   * Duplicate a Team Collection
+   *
+   * @param collectionID The Collection ID
+   * @returns Boolean of duplication status
+   */
+  async duplicateTeamCollection(collectionID: string) {
+    const collection = await this.getCollection(collectionID);
+    if (E.isLeft(collection)) return E.left(TEAM_INVALID_COLL_ID);
+
+    const collectionJSONObject = await this.exportCollectionToJSONObject(
+      collection.right.teamID,
+      collectionID,
+    );
+    if (E.isLeft(collectionJSONObject)) return E.left(TEAM_INVALID_COLL_ID);
+
+    const result = await this.importCollectionsFromJSON(
+      JSON.stringify([
+        {
+          ...collectionJSONObject.right,
+          name: `${collection.right.title} - Duplicate`,
+        },
+      ]),
+      collection.right.teamID,
+      collection.right.parentID,
+    );
+    if (E.isLeft(result)) return E.left(result.left as string);
+
+    return E.right(true);
   }
 }

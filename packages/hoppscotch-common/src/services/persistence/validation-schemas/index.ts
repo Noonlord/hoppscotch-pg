@@ -66,6 +66,9 @@ const SettingsDefSchema = z.object({
       cookie: z.boolean().catch(true),
     })
   ),
+
+  HAS_OPENED_SPOTLIGHT: z.optional(z.boolean()),
+  ENABLE_AI_EXPERIMENTS: z.optional(z.boolean()),
 })
 
 // Common properties shared across REST & GQL collections
@@ -274,7 +277,8 @@ const HoppGQLSaveContextSchema = z.nullable(
       .object({
         originLocation: z.literal("user-collection"),
         folderPath: z.string(),
-        requestIndex: z.number(),
+        // TODO: Investigate why this field is not populated at times
+        requestIndex: z.optional(z.number()),
       })
       .strict(),
     z
@@ -398,7 +402,7 @@ const HoppTestResultSchema = z
                 (x) => "secret" in x && !x.secret
               ).and(
                 z.object({
-                  previousValue: z.string(),
+                  previousValue: z.optional(z.string()),
                 })
               )
             ),
@@ -413,7 +417,7 @@ const HoppTestResultSchema = z
                 (x) => "secret" in x && !x.secret
               ).and(
                 z.object({
-                  previousValue: z.string(),
+                  previousValue: z.optional(z.string()),
                 })
               )
             ),
@@ -535,6 +539,7 @@ export const REST_TAB_STATE_SCHEMA = z
             responseTabPreference: z.optional(z.string()),
             optionTabPreference: z.optional(z.enum(validRestOperations)),
             inheritedProperties: z.optional(HoppInheritedPropertySchema),
+            cancelFunction: z.optional(z.function()),
           })
           .strict(),
       })

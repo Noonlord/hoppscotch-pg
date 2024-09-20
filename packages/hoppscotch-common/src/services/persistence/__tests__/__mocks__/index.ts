@@ -1,4 +1,8 @@
-import { Environment, HoppCollection } from "@hoppscotch/data"
+import {
+  Environment,
+  HoppCollection,
+  RESTReqSchemaVersion,
+} from "@hoppscotch/data"
 
 import { HoppGQLDocument } from "~/helpers/graphql/document"
 import { HoppRESTDocument } from "~/helpers/rest/document"
@@ -20,12 +24,12 @@ const DEFAULT_SETTINGS = getDefaultSettings()
 
 export const REST_COLLECTIONS_MOCK: HoppCollection[] = [
   {
-    v: 2,
+    v: 3,
     name: "Echo",
     folders: [],
     requests: [
       {
-        v: "3",
+        v: RESTReqSchemaVersion,
         endpoint: "https://echo.hoppscotch.io",
         name: "Echo test",
         params: [],
@@ -45,12 +49,12 @@ export const REST_COLLECTIONS_MOCK: HoppCollection[] = [
 
 export const GQL_COLLECTIONS_MOCK: HoppCollection[] = [
   {
-    v: 2,
+    v: 3,
     name: "Echo",
     folders: [],
     requests: [
       {
-        v: 3,
+        v: 6,
         name: "Echo test",
         url: "https://echo.hoppscotch.io/graphql",
         headers: [],
@@ -138,7 +142,7 @@ export const REST_HISTORY_MOCK: RESTHistoryEntry[] = [
       preRequestScript: "",
       testScript: "",
       requestVariables: [],
-      v: "3",
+      v: RESTReqSchemaVersion,
     },
     responseMeta: { duration: 807, statusCode: 200 },
     star: false,
@@ -150,7 +154,7 @@ export const GQL_HISTORY_MOCK: GQLHistoryEntry[] = [
   {
     v: 1,
     request: {
-      v: 3,
+      v: 6,
       name: "Untitled",
       url: "https://echo.hoppscotch.io/graphql",
       query: "query Request { url }",
@@ -171,7 +175,7 @@ export const GQL_TAB_STATE_MOCK: PersistableTabState<HoppGQLDocument> = {
       tabID: "5edbe8d4-65c9-4381-9354-5f1bf05d8ccc",
       doc: {
         request: {
-          v: 3,
+          v: 6,
           name: "Untitled",
           url: "https://echo.hoppscotch.io/graphql",
           headers: [],
@@ -194,7 +198,7 @@ export const REST_TAB_STATE_MOCK: PersistableTabState<HoppRESTDocument> = {
       tabID: "e6e8d800-caa8-44a2-a6a6-b4765a3167aa",
       doc: {
         request: {
-          v: "3",
+          v: RESTReqSchemaVersion,
           endpoint: "https://echo.hoppscotch.io",
           name: "Echo test",
           params: [],

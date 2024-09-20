@@ -6,13 +6,28 @@
     @close="hideModal"
   >
     <template #body>
-      <HoppSmartInput
-        v-model="editingName"
-        placeholder=" "
-        :label="t('action.label')"
-        input-styles="floating-input"
-        @submit="editRequest"
-      />
+      <div class="flex gap-1">
+        <HoppSmartInput
+          v-model="editingName"
+          class="flex-grow"
+          placeholder=" "
+          :label="t('action.label')"
+          input-styles="floating-input"
+          @submit="editRequest"
+        />
+        <HoppButtonSecondary
+          v-if="canDoRequestNameGeneration"
+          v-tippy="{ theme: 'tooltip' }"
+          :icon="IconSparkle"
+          :disabled="isGenerateRequestNamePending"
+          class="rounded-md"
+          :class="{
+            'animate-pulse': isGenerateRequestNamePending,
+          }"
+          :title="t('ai_experiments.generate_request_name')"
+          @click="generateRequestName(props.requestContext)"
+        />
+      </div>
     </template>
     <template #footer>
       <span class="flex space-x-2">
@@ -36,7 +51,10 @@
 <script setup lang="ts">
 import { useI18n } from "@composables/i18n"
 import { useToast } from "@composables/toast"
+import { HoppRESTRequest } from "@hoppscotch/data"
 import { useVModel } from "@vueuse/core"
+import { useRequestNameGeneration } from "~/composables/ai-experiments"
+import IconSparkle from "~icons/lucide/sparkles"
 
 const toast = useToast()
 const t = useI18n()
@@ -46,6 +64,7 @@ const props = withDefaults(
     show: boolean
     loadingState: boolean
     modelValue?: string
+    requestContext: HoppRESTRequest | null
   }>(),
   {
     show: false,
@@ -61,6 +80,12 @@ const emit = defineEmits<{
 }>()
 
 const editingName = useVModel(props, "modelValue")
+
+const {
+  generateRequestName,
+  canDoRequestNameGeneration,
+  isGenerateRequestNamePending,
+} = useRequestNameGeneration(editingName)
 
 const editRequest = () => {
   if (editingName.value.trim() === "") {

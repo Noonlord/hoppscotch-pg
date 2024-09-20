@@ -60,16 +60,10 @@
     </AppPaneLayout>
     <CollectionsEditRequest
       v-model="reqName"
+      :request-context="requestToRename"
       :show="showRenamingReqNameModal"
       @submit="renameReqName"
       @hide-modal="showRenamingReqNameModal = false"
-    />
-    <HoppSmartConfirmModal
-      :show="confirmingCloseForTabID !== null"
-      :confirm="t('modal.close_unsaved_tab')"
-      :title="t('confirm.save_unsaved_tab')"
-      @hide-modal="onCloseConfirmSaveTab"
-      @resolve="onResolveConfirmSaveTab"
     />
     <HoppSmartConfirmModal
       :show="confirmingCloseAllTabs"
@@ -78,6 +72,36 @@
       @hide-modal="confirmingCloseAllTabs = false"
       @resolve="onResolveConfirmCloseAllTabs"
     />
+    <HoppSmartModal
+      v-if="confirmingCloseForTabID !== null"
+      dialog
+      role="dialog"
+      aria-modal="true"
+      :title="t('modal.close_unsaved_tab')"
+      @close="confirmingCloseForTabID = null"
+    >
+      <template #body>
+        <div class="text-center">
+          {{ t("confirm.save_unsaved_tab") }}
+        </div>
+      </template>
+      <template #footer>
+        <span class="flex space-x-2">
+          <HoppButtonPrimary
+            v-focus
+            :label="t?.('action.yes')"
+            outline
+            @click="onResolveConfirmSaveTab"
+          />
+          <HoppButtonSecondary
+            :label="t?.('action.no')"
+            filled
+            outline
+            @click="onCloseConfirmSaveTab"
+          />
+        </span>
+      </template>
+    </HoppSmartModal>
     <CollectionsSaveRequest
       v-if="savingRequest"
       mode="rest"
@@ -95,7 +119,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted } from "vue"
+import { ref, onMounted, computed } from "vue"
 import { safelyExtractRESTRequest } from "@hoppscotch/data"
 import { translateExtURLParams } from "~/helpers/RESTExtURLParams"
 import { useRoute } from "vue-router"
@@ -233,13 +257,22 @@ const onResolveConfirmCloseAllTabs = () => {
   confirmingCloseAllTabs.value = false
 }
 
+const requestToRename = computed(() => {
+  if (!renameTabID.value) return null
+  const tab = tabs.getTabRef(renameTabID.value)
+  return tab.value.document.request
+})
+
 const openReqRenameModal = (tabID?: string) => {
   if (tabID) {
     const tab = tabs.getTabRef(tabID)
     reqName.value = tab.value.document.request.name
     renameTabID.value = tabID
   } else {
-    reqName.value = tabs.currentActiveTab.value.document.request.name
+    const { id, document } = tabs.currentActiveTab.value
+
+    reqName.value = document.request.name
+    renameTabID.value = id
   }
   showRenamingReqNameModal.value = true
 }

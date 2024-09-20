@@ -89,12 +89,17 @@ export class AdminService {
     adminEmail: string,
     inviteeEmail: string,
   ) {
-    if (inviteeEmail == adminEmail) return E.left(DUPLICATE_EMAIL);
+    if (inviteeEmail.toLowerCase() == adminEmail.toLowerCase()) {
+      return E.left(DUPLICATE_EMAIL);
+    }
     if (!validateEmail(inviteeEmail)) return E.left(INVALID_EMAIL);
 
     const alreadyInvitedUser = await this.prisma.invitedUsers.findFirst({
       where: {
-        inviteeEmail: inviteeEmail,
+        inviteeEmail: {
+          equals: inviteeEmail,
+          mode: 'insensitive',
+        },
       },
     });
     if (alreadyInvitedUser != null) return E.left(USER_ALREADY_INVITED);
@@ -156,10 +161,17 @@ export class AdminService {
    * @returns an Either of boolean or error string
    */
   async revokeUserInvitations(inviteeEmails: string[]) {
+    const areAllEmailsValid = inviteeEmails.every((email) =>
+      validateEmail(email),
+    );
+    if (!areAllEmailsValid) {
+      return E.left(INVALID_EMAIL);
+    }
+
     try {
       await this.prisma.invitedUsers.deleteMany({
         where: {
-          inviteeEmail: { in: inviteeEmails },
+          inviteeEmail: { in: inviteeEmails, mode: 'insensitive' },
         },
       });
       return E.right(true);
@@ -189,6 +201,7 @@ export class AdminService {
         NOT: {
           inviteeEmail: {
             in: userEmailObjs.map((user) => user.email),
+            mode: 'insensitive',
           },
         },
       },
@@ -414,7 +427,7 @@ export class AdminService {
    * Remove a user account by UID
    * @param userUid User UID
    * @returns an Either of boolean or error
-   * @deprecated use removeUserAccounts instead
+   *
    */
   async removeUserAccount(userUid: string) {
     const user = await this.userService.findUserById(userUid);
